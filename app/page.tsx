@@ -75,14 +75,22 @@ export default function Home() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [wt, wg, pt, pg] = await Promise.all([
-      fetch("/api/tasks?mode=work").then((r) => r.json()),
-      fetch("/api/goals?mode=work").then((r) => r.json()),
-      fetch("/api/tasks?mode=private").then((r) => r.json()),
-      fetch("/api/goals?mode=private").then((r) => r.json()),
-    ])
-    setData({ work: { tasks: wt, goals: wg }, private: { tasks: pt, goals: pg } })
-    setLoading(false)
+    try {
+      const [wt, wg, pt, pg] = await Promise.all([
+        fetch("/api/tasks?mode=work").then((r) => r.json()),
+        fetch("/api/goals?mode=work").then((r) => r.json()),
+        fetch("/api/tasks?mode=private").then((r) => r.json()),
+        fetch("/api/goals?mode=private").then((r) => r.json()),
+      ])
+      setData({
+        work: { tasks: Array.isArray(wt) ? wt : [], goals: Array.isArray(wg) ? wg : [] },
+        private: { tasks: Array.isArray(pt) ? pt : [], goals: Array.isArray(pg) ? pg : [] },
+      })
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
