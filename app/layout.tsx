@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next"
 import { SessionProvider } from "next-auth/react"
-import { auth } from "@/auth"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -13,12 +12,11 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth()
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
       <body>
-        <SessionProvider session={session}>{children}</SessionProvider>
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   )
