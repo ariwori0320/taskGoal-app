@@ -1,17 +1,2 @@
-import { auth } from "./auth"
-
-export default auth((req) => {
-  const isLoggedIn = !!req.auth
-  const isLoginPage = req.nextUrl.pathname === "/login"
-
-  if (!isLoggedIn && !isLoginPage) {
-    return Response.redirect(new URL("/login", req.url))
-  }
-  if (isLoggedIn && isLoginPage) {
-    return Response.redirect(new URL("/", req.url))
-  }
-})
-
-export const config = {
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
-}
+// 認証チェックはクライアントサイドで行うため、ミドルウェアは使用しない
+export {}

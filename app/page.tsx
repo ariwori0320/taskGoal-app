@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useSession, signOut } from "next-auth/react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 
 type Mode = "work" | "private"
@@ -52,6 +53,7 @@ function isOverdue(dateStr: string | null): boolean {
 
 export default function Home() {
   const { data: session, status } = useSession()
+  const router = useRouter()
   const [mode, setMode] = useState<Mode>("work")
   const [data, setData] = useState<Record<Mode, ModeData>>({
     work: { tasks: [], goals: [] },
@@ -85,8 +87,9 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
+    if (status === "unauthenticated") router.push("/login")
     if (status === "authenticated") fetchAll()
-  }, [status, fetchAll])
+  }, [status, fetchAll, router])
 
   // Task actions
   async function addTask() {
@@ -174,7 +177,7 @@ export default function Home() {
   const mc = mode // "work" | "private"
   const accentCls = mc === "work" ? "work" : "private"
 
-  if (status === "loading") return <div className="loading">読み込み中...</div>
+  if (status === "loading" || status === "unauthenticated") return <div className="loading">読み込み中...</div>
 
   return (
     <>
