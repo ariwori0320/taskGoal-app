@@ -1,17 +1,26 @@
 import { NextAuthOptions } from "next-auth"
-import GithubProvider from "next-auth/providers/github"
+import CredentialsProvider from "next-auth/providers/credentials"
 
 export const authOptions: NextAuthOptions = {
   providers: [
-    GithubProvider({
-      clientId: process.env.AUTH_GITHUB_ID!,
-      clientSecret: process.env.AUTH_GITHUB_SECRET!,
+    CredentialsProvider({
+      name: "Password",
+      credentials: {
+        password: { label: "パスワード", type: "password" },
+      },
+      async authorize(credentials) {
+        if (credentials?.password === process.env.APP_PASSWORD) {
+          return { id: "owner", name: "けんた", email: "owner@myflow.app" }
+        }
+        return null
+      },
     }),
   ],
   secret: process.env.AUTH_SECRET,
+  pages: { signIn: "/login" },
   callbacks: {
     session({ session, token }) {
-      if (token.sub) (session.user as any).id = token.sub
+      if (token.sub) session.user.id = token.sub
       return session
     },
   },
