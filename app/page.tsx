@@ -67,6 +67,10 @@ export default function Home() {
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
   const [taskDue, setTaskDue] = useState("")
 
+  // AI サブタスク提案
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [suggesting, setSuggesting] = useState(false)
+
   // Goal form
   const [goalText, setGoalText] = useState("")
   const [goalDue, setGoalDue] = useState("")
@@ -91,18 +95,42 @@ export default function Home() {
     if (status === "authenticated") fetchAll()
   }, [status, fetchAll, router])
 
-  // Task actions
-  async function addTask() {
+  // AI サブタスク提案
+  async function suggestSubtasks() {
     if (!taskText.trim()) return
+    setSuggesting(true)
+    setSuggestions([])
+    const res = await fetch("/api/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: taskText }),
+    })
+    const data = await res.json()
+    setSuggestions(data.suggestions || [])
+    setSuggesting(false)
+  }
+
+  // Task actions
+  async function addTask(text?: string) {
+    const t = (text ?? taskText).trim()
+    if (!t) return
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: taskText, priority: taskPriority, due_date: taskDue || null, mode }),
+      body: JSON.stringify({ text: t, priority: taskPriority, due_date: taskDue || null, mode }),
     })
     const task: Task = await res.json()
     setData((prev) => ({ ...prev, [mode]: { ...prev[mode], tasks: [task, ...prev[mode].tasks] } }))
-    setTaskText("")
-    setTaskDue("")
+    if (!text) {
+      setTaskText("")
+      setTaskDue("")
+      setSuggestions([])
+    }
+  }
+
+  async function addAllSuggestions() {
+    for (const s of suggestions) await addTask(s)
+    setSuggestions([])
   }
 
   async function toggleTask(id: string, done: boolean) {
@@ -253,7 +281,7 @@ export default function Home() {
               type="text"
               placeholder="新しいタスクを追加..."
               value={taskText}
-              onChange={(e) => setTaskText(e.target.value)}
+              onChange={(e) => { setTaskText(e.target.value); setSuggestions([]) }}
               onKeyDown={(e) => e.key === "Enter" && addTask()}
             />
             <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as Priority)}>
@@ -267,10 +295,34 @@ export default function Home() {
               value={taskDue}
               onChange={(e) => setTaskDue(e.target.value)}
             />
-            <button className={`add-btn add-btn-${accentCls}`} onClick={addTask}>
+            <button
+              className="ai-btn"
+              onClick={suggestSubtasks}
+              disabled={suggesting || !taskText.trim()}
+              title="AIがサブタスクに分解"
+            >
+              {suggesting ? "⏳" : "🤖"}
+            </button>
+            <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask()}>
               +
             </button>
           </div>
+
+          {/* AI サブタスク提案 */}
+          {suggestions.length > 0 && (
+            <div className="suggest-box">
+              <div className="suggest-header">
+                <span>🎬 映像化できるステップに分解しました</span>
+                <button className="suggest-all-btn" onClick={addAllSuggestions}>すべて追加</button>
+              </div>
+              {suggestions.map((s, i) => (
+                <div className="suggest-item" key={i}>
+                  <span className="suggest-text">{s}</span>
+                  <button className="suggest-add" onClick={() => addTask(s)}>+ 追加</button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="filter-tabs">
             {(["all", "active", "done"] as Filter[]).map((ff) => (
