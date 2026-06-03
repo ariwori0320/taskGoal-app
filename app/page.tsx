@@ -264,7 +264,7 @@ export default function Home() {
               {mc === "work" ? "仕事" : "プライベート"}
             </span>
           </div>
-          <div className="input-row">
+          <div className="input-row" style={{ flexWrap: "wrap", gap: "8px" }}>
             <input
               className="input-main"
               type="text"
@@ -272,8 +272,23 @@ export default function Home() {
               value={taskText}
               onChange={(e) => { setTaskText(e.target.value); setSuggestions([]) }}
               onKeyDown={(e) => e.key === "Enter" && addTask()}
+              style={{ minWidth: "160px" }}
             />
-            <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as Priority)}>
+            <button
+              className="ai-btn"
+              onClick={suggestSubtasks}
+              disabled={suggesting || !taskText.trim()}
+              title="AIがサブタスクに分解"
+              style={{ fontSize: "14px", padding: "8px 12px" }}
+            >
+              {suggesting ? "⏳" : "🤖 AI分解"}
+            </button>
+            <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask()}>
+              +
+            </button>
+          </div>
+          <div className="input-row" style={{ paddingTop: "0", paddingBottom: "10px", gap: "8px" }}>
+            <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as Priority)} style={{ fontSize: "12px" }}>
               <option value="high">🔴 高</option>
               <option value="mid">🟠 中</option>
               <option value="low">🟢 低</option>
@@ -283,18 +298,8 @@ export default function Home() {
               type="date"
               value={taskDue}
               onChange={(e) => setTaskDue(e.target.value)}
+              style={{ fontSize: "12px" }}
             />
-            <button
-              className="ai-btn"
-              onClick={suggestSubtasks}
-              disabled={suggesting || !taskText.trim()}
-              title="AIがサブタスクに分解"
-            >
-              {suggesting ? "⏳" : "🤖"}
-            </button>
-            <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask()}>
-              +
-            </button>
           </div>
 
           {/* AI サブタスク提案 */}
