@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>タスク・目標管理</title>
+  <style>
+    :root {
+      --work-primary: #2563eb;
+      --work-light: #eff6ff;
+      --work-accent: #1d4ed8;
+      --private-primary: #7c3aed;
+      --private-light: #f5f3ff;
+      --private-accent: #6d28d9;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-900: #111827;
+      --green: #16a34a;
+      --green-light: #dcfce7;
+      --red: #dc2626;
+      --red-light: #fee2e2;
+      --orange: #ea580c;
+      --orange-light: #ffedd5;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-900);
+      min-height: 100vh;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 60px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+
+    .logo { font-size: 18px; font-weight: 700; color: var(--gray-900); }
+
+    .mode-toggle {
+      display: flex;
+      background: var(--gray-100);
+      border-radius: 10px;
+      padding: 4px;
+      gap: 2px;
+    }
+
+    .mode-btn {
+      padding: 6px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all .2s;
+      background: transparent;
+      color: var(--gray-500);
+    }
+
+    .mode-btn.active[data-mode="work"] {
+      background: var(--work-primary);
+      color: white;
+    }
+
+    .mode-btn.active[data-mode="private"] {
+      background: var(--private-primary);
+      color: white;
+    }
+
+    /* ---- Layout ---- */
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 720px) {
+      .container { grid-template-columns: 1fr; padding: 16px; }
+    }
+
+    /* ---- Cards ---- */
+    .card {
+      background: white;
+      border-radius: 16px;
+      border: 1px solid var(--gray-200);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--gray-100);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .icon { font-size: 18px; }
+
+    .badge {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .work .badge { background: var(--work-light); color: var(--work-primary); }
+    .private .badge { background: var(--private-light); color: var(--private-primary); }
+
+    /* ---- Input row ---- */
+    .input-row {
+      display: flex;
+      gap: 8px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--gray-100);
+    }
+
+    .input-row input, .input-row select {
+      flex: 1;
+      border: 1px solid var(--gray-200);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 14px;
+      outline: none;
+      transition: border .15s;
+    }
+
+    .input-row input:focus, .input-row select:focus { border-color: var(--gray-400); }
+
+    .add-btn {
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 20px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: opacity .15s;
+      line-height: 1;
+    }
+
+    .add-btn:hover { opacity: .85; }
+
+    .work .add-btn { background: var(--work-primary); color: white; }
+    .private .add-btn { background: var(--private-primary); color: white; }
+
+    /* ---- Task list ---- */
+    .list-body { padding: 8px 0; min-height: 80px; }
+
+    .empty-msg {
+      text-align: center;
+      color: var(--gray-500);
+      font-size: 13px;
+      padding: 24px 0;
+    }
+
+    .task-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--gray-100);
+      transition: background .1s;
+    }
+
+    .task-item:last-child { border-bottom: none; }
+    .task-item:hover { background: var(--gray-50); }
+
+    .task-check {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      border: 2px solid var(--gray-300);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all .15s;
+    }
+
+    .task-check.done { border-color: var(--green); background: var(--green); color: white; }
+    .task-check.done::after { content: '✓'; font-size: 11px; font-weight: 700; }
+
+    .work .task-check:not(.done):hover { border-color: var(--work-primary); }
+    .private .task-check:not(.done):hover { border-color: var(--private-primary); }
+
+    .task-text {
+      flex: 1;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .task-text.done { text-decoration: line-through; color: var(--gray-500); }
+
+    .priority-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .priority-high { background: var(--red); }
+    .priority-mid  { background: var(--orange); }
+    .priority-low  { background: var(--green); }
+
+    .task-due {
+      font-size: 11px;
+      color: var(--gray-500);
+      white-space: nowrap;
+    }
+
+    .task-due.overdue { color: var(--red); font-weight: 600; }
+
+    .del-btn {
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: var(--gray-300);
+      font-size: 16px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color .1s;
+      line-height: 1;
+    }
+
+    .del-btn:hover { color: var(--red); }
+
+    /* ---- Goal card ---- */
+    .goal-item {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--gray-100);
+    }
+
+    .goal-item:last-child { border-bottom: none; }
+
+    .goal-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .goal-name {
+      font-size: 14px;
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .goal-name.done { text-decoration: line-through; color: var(--gray-500); }
+
+    .goal-pct {
+      font-size: 13px;
+      font-weight: 700;
+      min-width: 36px;
+      text-align: right;
+    }
+
+    .work .goal-pct { color: var(--work-primary); }
+    .private .goal-pct { color: var(--private-primary); }
+
+    .progress-bar {
+      height: 6px;
+      background: var(--gray-100);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width .3s ease;
+    }
+
+    .work .progress-fill { background: var(--work-primary); }
+    .private .progress-fill { background: var(--private-primary); }
+
+    .goal-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .goal-controls input[type="range"] {
+      flex: 1;
+      accent-color: var(--work-primary);
+      cursor: pointer;
+    }
+
+    .private .goal-controls input[type="range"] { accent-color: var(--private-primary); }
+
+    .goal-due {
+      font-size: 11px;
+      color: var(--gray-500);
+      white-space: nowrap;
+    }
+
+    /* ---- Stats bar ---- */
+    .stats {
+      grid-column: 1 / -1;
+      background: white;
+      border-radius: 16px;
+      border: 1px solid var(--gray-200);
+      padding: 18px 24px;
+      display: flex;
+      gap: 0;
+    }
+
+    .stat {
+      flex: 1;
+      text-align: center;
+      padding: 0 12px;
+      border-right: 1px solid var(--gray-100);
+    }
+
+    .stat:last-child { border-right: none; }
+
+    .stat-num {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .work .stat-num { color: var(--work-primary); }
+    .private .stat-num { color: var(--private-primary); }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--gray-500);
+    }
+
+    /* ---- Filter tabs ---- */
+    .filter-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 10px 20px 0;
+    }
+
+    .filter-tab {
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: none;
+      background: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--gray-500);
+      transition: all .15s;
+    }
+
+    .filter-tab.active {
+      background: var(--gray-100);
+      color: var(--gray-900);
+    }
+
+    /* ---- Goal input extras ---- */
+    .goal-input-row {
+      flex-wrap: wrap;
+    }
+
+    .goal-input-row input[type="text"] { min-width: 140px; }
+    .goal-input-row input[type="date"] { width: 130px; flex: none; }
+
+    /* ---- Animations ---- */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .task-item, .goal-item { animation: fadeIn .15s ease; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">📋 MyFlow</div>
+  <div class="mode-toggle">
+    <button class="mode-btn active" data-mode="work" onclick="setMode('work')">💼 仕事</button>
+    <button class="mode-btn" data-mode="private" onclick="setMode('private')">🏠 プライベート</button>
+  </div>
+</header>
+
+<div class="container" id="app"></div>
+
+<script>
+// ---- State ----
+let mode = 'work'; // 'work' | 'private'
+let taskFilter = { work: 'all', private: 'all' };
+
+const state = JSON.parse(localStorage.getItem('myflow') || 'null') || {
+  work: { tasks: [], goals: [] },
+  private: { tasks: [], goals: [] }
+};
+
+function save() { localStorage.setItem('myflow', JSON.stringify(state)); }
+
+// ---- Helpers ----
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+
+function fmt(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  const now = new Date(); now.setHours(0,0,0,0);
+  const diff = Math.round((d - now) / 86400000);
+  if (diff === 0) return '今日';
+  if (diff === 1) return '明日';
+  if (diff < 0) return `${Math.abs(diff)}日超過`;
+  return `${diff}日後`;
+}
+
+function isOverdue(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr + 'T00:00:00');
+  const now = new Date(); now.setHours(0,0,0,0);
+  return d < now;
+}
+
+// ---- Mode ----
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  render();
+}
+
+// ---- Task actions ----
+function addTask() {
+  const inp = document.getElementById('task-input');
+  const pri = document.getElementById('task-priority');
+  const due = document.getElementById('task-due');
+  const text = inp.value.trim();
+  if (!text) { inp.focus(); return; }
+  state[mode].tasks.unshift({ id: uid(), text, priority: pri.value, due: due.value, done: false });
+  inp.value = ''; due.value = '';
+  save(); render();
+}
+
+function toggleTask(id) {
+  const t = state[mode].tasks.find(x => x.id === id);
+  if (t) { t.done = !t.done; save(); render(); }
+}
+
+function deleteTask(id) {
+  state[mode].tasks = state[mode].tasks.filter(x => x.id !== id);
+  save(); render();
+}
+
+// ---- Goal actions ----
+function addGoal() {
+  const inp = document.getElementById('goal-input');
+  const due = document.getElementById('goal-due');
+  const text = inp.value.trim();
+  if (!text) { inp.focus(); return; }
+  state[mode].goals.unshift({ id: uid(), text, due: due.value, pct: 0 });
+  inp.value = ''; due.value = '';
+  save(); render();
+}
+
+function updateGoalPct(id, val) {
+  const g = state[mode].goals.find(x => x.id === id);
+  if (g) { g.pct = Number(val); save(); renderGoals(); }
+}
+
+function deleteGoal(id) {
+  state[mode].goals = state[mode].goals.filter(x => x.id !== id);
+  save(); render();
+}
+
+// ---- Filter ----
+function setFilter(f) {
+  taskFilter[mode] = f;
+  renderTasks();
+}
+
+// ---- Render ----
+function filteredTasks() {
+  const f = taskFilter[mode];
+  const tasks = state[mode].tasks;
+  if (f === 'active') return tasks.filter(t => !t.done);
+  if (f === 'done')   return tasks.filter(t => t.done);
+  return tasks;
+}
+
+function renderTasks() {
+  const f = taskFilter[mode];
+  // filter tabs
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+
+  const list = document.getElementById('task-list');
+  const tasks = filteredTasks();
+  if (!tasks.length) {
+    list.innerHTML = `<div class="empty-msg">タスクがありません</div>`;
+    return;
+  }
+  list.innerHTML = tasks.map(t => `
+    <div class="task-item">
+      <div class="task-check ${t.done ? 'done' : ''}" onclick="toggleTask('${t.id}')"></div>
+      <div class="priority-dot priority-${t.priority}"></div>
+      <div class="task-text ${t.done ? 'done' : ''}">${esc(t.text)}</div>
+      ${t.due ? `<div class="task-due ${!t.done && isOverdue(t.due) ? 'overdue' : ''}">${fmt(t.due)}</div>` : ''}
+      <button class="del-btn" onclick="deleteTask('${t.id}')">×</button>
+    </div>
+  `).join('');
+}
+
+function renderGoals() {
+  const list = document.getElementById('goal-list');
+  const goals = state[mode].goals;
+  if (!goals.length) {
+    list.innerHTML = `<div class="empty-msg">目標がありません</div>`;
+    return;
+  }
+  list.innerHTML = goals.map(g => `
+    <div class="goal-item">
+      <div class="goal-top">
+        <div class="goal-name ${g.pct >= 100 ? 'done' : ''}">${esc(g.text)}</div>
+        <div class="goal-pct">${g.pct}%</div>
+        <button class="del-btn" style="margin-left:8px" onclick="deleteGoal('${g.id}')">×</button>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${g.pct}%"></div></div>
+      <div class="goal-controls">
+        <input type="range" min="0" max="100" value="${g.pct}" oninput="updateGoalPct('${g.id}', this.value)">
+        ${g.due ? `<div class="goal-due">${fmt(g.due)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderStats() {
+  const tasks = state[mode].tasks;
+  const goals = state[mode].goals;
+  const done = tasks.filter(t => t.done).length;
+  const active = tasks.filter(t => !t.done).length;
+  const overdue = tasks.filter(t => !t.done && isOverdue(t.due)).length;
+  const avgGoal = goals.length ? Math.round(goals.reduce((a, g) => a + g.pct, 0) / goals.length) : 0;
+
+  const el = document.getElementById('stats');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="stat"><div class="stat-num">${active}</div><div class="stat-label">未完了タスク</div></div>
+    <div class="stat"><div class="stat-num">${done}</div><div class="stat-label">完了タスク</div></div>
+    <div class="stat"><div class="stat-num">${overdue}</div><div class="stat-label">期限超過</div></div>
+    <div class="stat"><div class="stat-num">${avgGoal}%</div><div class="stat-label">目標平均進捗</div></div>
+  `;
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function render() {
+  const m = mode;
+  const cl = m === 'work' ? 'work' : 'private';
+  const icon = m === 'work' ? '💼' : '🏠';
+  const label = m === 'work' ? '仕事' : 'プライベート';
+
+  document.getElementById('app').innerHTML = `
+    <!-- Stats -->
+    <div class="stats ${cl}" id="stats"></div>
+
+    <!-- Tasks -->
+    <div class="card ${cl}">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">✅</span> タスク</div>
+        <span class="badge">${label}</span>
+      </div>
+      <div class="input-row">
+        <input id="task-input" type="text" placeholder="新しいタスクを追加..." onkeydown="if(event.key==='Enter')addTask()">
+        <select id="task-priority">
+          <option value="high">🔴 高</option>
+          <option value="mid" selected>🟠 中</option>
+          <option value="low">🟢 低</option>
+        </select>
+        <input id="task-due" type="date" style="width:130px;flex:none">
+        <button class="add-btn" onclick="addTask()">+</button>
+      </div>
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-f="all" onclick="setFilter('all')">すべて</button>
+        <button class="filter-tab" data-f="active" onclick="setFilter('active')">未完了</button>
+        <button class="filter-tab" data-f="done" onclick="setFilter('done')">完了</button>
+      </div>
+      <div class="list-body" id="task-list"></div>
+    </div>
+
+    <!-- Goals -->
+    <div class="card ${cl}">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">🎯</span> 目標</div>
+        <span class="badge">${label}</span>
+      </div>
+      <div class="input-row goal-input-row">
+        <input id="goal-input" type="text" placeholder="新しい目標を追加..." onkeydown="if(event.key==='Enter')addGoal()">
+        <input id="goal-due" type="date" style="width:130px;flex:none">
+        <button class="add-btn" onclick="addGoal()">+</button>
+      </div>
+      <div class="list-body" id="goal-list"></div>
+    </div>
+  `;
+
+  // restore filter tab state
+  const f = taskFilter[mode];
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+
+  renderStats();
+  renderTasks();
+  renderGoals();
+}
+
+render();
+</script>
+</body>
+</html>
