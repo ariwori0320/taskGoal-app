@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 
 export default function LoginPage() {
@@ -15,13 +14,15 @@ export default function LoginPage() {
     setLoading(true)
     setError("")
 
-    const res = await signIn("credentials", {
-      password,
-      redirect: false,
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
     })
 
-    if (res?.ok) {
+    if (res.ok) {
       router.push("/")
+      router.refresh()
     } else {
       setError("パスワードが違います")
       setLoading(false)
@@ -52,14 +53,8 @@ export default function LoginPage() {
             }}
             autoFocus
           />
-          {error && (
-            <p style={{ color: "#dc2626", fontSize: "13px", margin: 0 }}>{error}</p>
-          )}
-          <button
-            type="submit"
-            className="github-btn"
-            disabled={loading || !password}
-          >
+          {error && <p style={{ color: "#dc2626", fontSize: "13px", margin: 0 }}>{error}</p>}
+          <button type="submit" className="github-btn" disabled={loading || !password}>
             {loading ? "確認中..." : "ログイン"}
           </button>
         </form>

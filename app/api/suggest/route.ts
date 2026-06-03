@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
+import { getSession } from "@/lib/session"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await getSession()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { task } = await req.json()
   if (!task?.trim()) return NextResponse.json({ error: "task required" }, { status: 400 })
@@ -36,10 +35,8 @@ JSON配列のみ返してください：`,
   })
 
   const text = message.content[0].type === "text" ? message.content[0].text : "[]"
-
   try {
-    const suggestions = JSON.parse(text.trim())
-    return NextResponse.json({ suggestions })
+    return NextResponse.json({ suggestions: JSON.parse(text.trim()) })
   } catch {
     return NextResponse.json({ suggestions: [] })
   }

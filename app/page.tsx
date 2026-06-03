@@ -1,9 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import Image from "next/image"
 
 type Mode = "work" | "private"
 type Priority = "high" | "mid" | "low"
@@ -52,8 +50,8 @@ function isOverdue(dateStr: string | null): boolean {
 }
 
 export default function Home() {
-  const { data: session, status } = useSession()
   const router = useRouter()
+  const [authed, setAuthed] = useState<boolean | null>(null)
   const [mode, setMode] = useState<Mode>("work")
   const [data, setData] = useState<Record<Mode, ModeData>>({
     work: { tasks: [], goals: [] },
@@ -91,9 +89,11 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login")
-    if (status === "authenticated") fetchAll()
-  }, [status, fetchAll, router])
+    fetch("/api/auth/me").then((r) => r.json()).then((d) => {
+      if (d.user) { setAuthed(true); fetchAll() }
+      else router.push("/login")
+    })
+  }, [fetchAll, router])
 
   // AI サブタスク提案
   async function suggestSubtasks() {
@@ -205,7 +205,12 @@ export default function Home() {
   const mc = mode // "work" | "private"
   const accentCls = mc === "work" ? "work" : "private"
 
-  if (status === "loading" || status === "unauthenticated") return <div className="loading">読み込み中...</div>
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" })
+    router.push("/login")
+  }
+
+  if (!authed) return <div className="loading">読み込み中...</div>
 
   return (
     <>
@@ -227,17 +232,7 @@ export default function Home() {
             </button>
           </div>
           <div className="user-area">
-            {session?.user?.image && (
-              <Image
-                src={session.user.image}
-                alt="avatar"
-                width={32}
-                height={32}
-                className="user-avatar"
-              />
-            )}
-            <span className="user-name">{session?.user?.name}</span>
-            <button className="signout-btn" onClick={() => signOut()}>
+            <button className="signout-btn" onClick={handleLogout}>
               ログアウト
             </button>
           </div>

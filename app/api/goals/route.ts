@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
+import { getSession } from "@/lib/session"
 import { getSupabase } from "@/lib/db"
 
 function uid() {
@@ -8,8 +7,8 @@ function uid() {
 }
 
 export async function GET(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await getSession()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const mode = new URL(req.url).searchParams.get("mode") || "work"
   const supabase = getSupabase()
@@ -17,7 +16,7 @@ export async function GET(req: Request) {
   const { data, error } = await supabase
     .from("goals")
     .select("*")
-    .eq("user_id", session.user.id)
+    .eq("user_id", session.userId)
     .eq("mode", mode)
     .order("created_at", { ascending: false })
 
@@ -26,8 +25,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const session = await getSession()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { text, due_date, mode } = await req.json()
   if (!text?.trim()) return NextResponse.json({ error: "text required" }, { status: 400 })
@@ -37,7 +36,7 @@ export async function POST(req: Request) {
     .from("goals")
     .insert({
       id: uid(),
-      user_id: session.user.id,
+      user_id: session.userId,
       mode,
       text: text.trim(),
       due_date: due_date || null,
