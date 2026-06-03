@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server"
-import { getSession } from "@/lib/session"
 import { getSupabase } from "@/lib/db"
+
+const USER_ID = "default"
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2)
 }
 
 export async function GET(req: Request) {
-  const session = await getSession()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   const mode = new URL(req.url).searchParams.get("mode") || "work"
-  const supabase = getSupabase()
-
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("tasks")
     .select("*")
-    .eq("user_id", session.userId)
+    .eq("user_id", USER_ID)
     .eq("mode", mode)
     .order("created_at", { ascending: false })
 
@@ -25,23 +21,12 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await getSession()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   const { text, priority, due_date, mode } = await req.json()
   if (!text?.trim()) return NextResponse.json({ error: "text required" }, { status: 400 })
 
-  const supabase = getSupabase()
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("tasks")
-    .insert({
-      id: uid(),
-      user_id: session.userId,
-      mode,
-      text: text.trim(),
-      priority: priority || "mid",
-      due_date: due_date || null,
-    })
+    .insert({ id: uid(), user_id: USER_ID, mode, text: text.trim(), priority: priority || "mid", due_date: due_date || null })
     .select()
     .single()
 

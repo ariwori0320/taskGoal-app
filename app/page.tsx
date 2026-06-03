@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { useRouter } from "next/navigation"
 
 type Mode = "work" | "private"
 type Priority = "high" | "mid" | "low"
@@ -50,8 +49,6 @@ function isOverdue(dateStr: string | null): boolean {
 }
 
 export default function Home() {
-  const router = useRouter()
-  const [authed, setAuthed] = useState<boolean | null>(null)
   const [mode, setMode] = useState<Mode>("work")
   const [data, setData] = useState<Record<Mode, ModeData>>({
     work: { tasks: [], goals: [] },
@@ -89,11 +86,8 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    fetch("/api/auth/me").then((r) => r.json()).then((d) => {
-      if (d.user) { setAuthed(true); fetchAll() }
-      else router.push("/login")
-    })
-  }, [fetchAll, router])
+    fetchAll()
+  }, [fetchAll])
 
   // AI サブタスク提案
   async function suggestSubtasks() {
@@ -205,12 +199,8 @@ export default function Home() {
   const mc = mode // "work" | "private"
   const accentCls = mc === "work" ? "work" : "private"
 
-  async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" })
-    router.push("/login")
-  }
-
-  if (!authed) return <div className="loading">読み込み中...</div>
+  if (loading && data.work.tasks.length === 0 && data.private.tasks.length === 0)
+    return <div className="loading">読み込み中...</div>
 
   return (
     <>
@@ -231,11 +221,7 @@ export default function Home() {
               🏠 プライベート
             </button>
           </div>
-          <div className="user-area">
-            <button className="signout-btn" onClick={handleLogout}>
-              ログアウト
-            </button>
-          </div>
+          <div className="user-area"></div>
         </div>
       </header>
 

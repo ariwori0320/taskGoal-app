@@ -1,13 +1,9 @@
 import { NextResponse } from "next/server"
-import { getSession } from "@/lib/session"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function POST(req: Request) {
-  const session = await getSession()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   const { task } = await req.json()
   if (!task?.trim()) return NextResponse.json({ error: "task required" }, { status: 400 })
 

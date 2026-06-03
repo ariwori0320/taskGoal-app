@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server"
-import { getSession } from "@/lib/session"
 import { getSupabase } from "@/lib/db"
 
+const USER_ID = "default"
+
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const session = await getSession()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
   const { pct } = await req.json()
-  const supabase = getSupabase()
-
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("goals")
     .update({ pct })
     .eq("id", params.id)
-    .eq("user_id", session.userId)
+    .eq("user_id", USER_ID)
     .select()
     .single()
 
@@ -22,15 +18,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
-  const session = await getSession()
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  const supabase = getSupabase()
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("goals")
     .delete()
     .eq("id", params.id)
-    .eq("user_id", session.userId)
+    .eq("user_id", USER_ID)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
