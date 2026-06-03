@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
 import { getSupabase } from "@/lib/db"
 
 function uid() {
@@ -7,7 +8,7 @@ function uid() {
 }
 
 export async function GET(req: Request) {
-  const session = await auth()
+  const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const mode = new URL(req.url).searchParams.get("mode") || "work"
@@ -25,7 +26,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
+  const session = await getServerSession(authOptions)
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { text, due_date, mode } = await req.json()
