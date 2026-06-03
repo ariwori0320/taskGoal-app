@@ -264,45 +264,59 @@ export default function Home() {
               {mc === "work" ? "仕事" : "プライベート"}
             </span>
           </div>
-          <div className="input-row" style={{ flexWrap: "wrap", gap: "8px" }}>
-            <input
-              className="input-main"
-              type="text"
-              placeholder="新しいタスクを追加..."
-              value={taskText}
-              onChange={(e) => { setTaskText(e.target.value); setSuggestions([]) }}
-              onKeyDown={(e) => e.key === "Enter" && addTask()}
-              style={{ minWidth: "160px" }}
-            />
-            <button
-              className="ai-btn"
-              onClick={suggestSubtasks}
-              disabled={suggesting || !taskText.trim()}
-              title="AIがサブタスクに分解"
-              style={{ fontSize: "14px", padding: "8px 12px" }}
-            >
-              {suggesting ? "⏳" : "🤖 AI分解"}
-            </button>
-            <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask()}>
-              +
-            </button>
-          </div>
-          <div className="input-row" style={{ paddingTop: "0", paddingBottom: "10px", gap: "8px" }}>
-            <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as Priority)} style={{ fontSize: "12px" }}>
-              <option value="high">🔴 高</option>
-              <option value="mid">🟠 中</option>
-              <option value="low">🟢 低</option>
-            </select>
-            <input
-              className="input-date"
-              type="date"
-              value={taskDue}
-              onChange={(e) => setTaskDue(e.target.value)}
-              style={{ fontSize: "12px" }}
-            />
+          {/* タスク入力 */}
+          <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                className="input-main"
+                type="text"
+                placeholder="新しいタスクを追加..."
+                value={taskText}
+                onChange={(e) => { setTaskText(e.target.value); setSuggestions([]) }}
+                onKeyDown={(e) => e.key === "Enter" && addTask()}
+                style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }}
+              />
+              <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask()}>+</button>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}>
+                <option value="high">🔴 高</option>
+                <option value="mid">🟠 中</option>
+                <option value="low">🟢 低</option>
+              </select>
+              <input
+                type="date"
+                value={taskDue}
+                onChange={(e) => setTaskDue(e.target.value)}
+                style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}
+              />
+              <button
+                onClick={suggestSubtasks}
+                disabled={suggesting || !taskText.trim()}
+                style={{
+                  background: suggesting ? "#e5e7eb" : "#6366f1",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "8px",
+                  padding: "6px 14px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  cursor: suggesting || !taskText.trim() ? "not-allowed" : "pointer",
+                  opacity: !taskText.trim() ? 0.5 : 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {suggesting ? "⏳ AI考え中..." : "🤖 AI分解"}
+              </button>
+            </div>
           </div>
 
           {/* AI サブタスク提案 */}
+          {suggesting && (
+            <div style={{ padding: "12px 20px", background: "#eef2ff", fontSize: "13px", color: "#4338ca", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>⏳</span> AIがタスクを映像化できるステップに分解しています...
+            </div>
+          )}
           {suggestions.length > 0 && (
             <div className="suggest-box">
               <div className="suggest-header">
