@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js"
 
-// サーバーサイド専用 — service_role key で RLS をバイパス
+const SUPABASE_URL = "https://giormjyjrdyzcbsrmoeb.supabase.co"
+
 export function getSupabase() {
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 }
