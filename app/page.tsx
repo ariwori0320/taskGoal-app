@@ -60,6 +60,7 @@ function isOverdue(d: string | null) {
 
 export default function Home() {
   const router = useRouter()
+  const taskInputRef = useRef<HTMLInputElement>(null)
   const [mode, setMode] = useState<Mode>("work")
   const [tab, setTab] = useState<Tab>("tasks")
   const [tasks, setTasks] = useState<Task[]>([])
@@ -374,18 +375,36 @@ export default function Home() {
             <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
               <div style={{ display: "flex", gap: "8px" }}>
                 <input
+                  ref={taskInputRef}
                   style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }}
                   placeholder="親タスクを追加..."
-                  value={taskText}
-                  onChange={e => setTaskText(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && addTask(taskText)}
+                  defaultValue=""
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      const val = taskInputRef.current?.value || ""
+                      setTaskText(val)
+                      addTask(val)
+                      if (taskInputRef.current) taskInputRef.current.value = ""
+                    }
+                  }}
                 />
                 <button
-                  onClick={() => openAiModal(taskText)}
-                  disabled={!taskText.trim()}
-                  style={{ background: taskText.trim() ? "#6366f1" : "#e5e7eb", color: taskText.trim() ? "white" : "#9ca3af", border: "none", borderRadius: "8px", padding: "8px 14px", cursor: taskText.trim() ? "pointer" : "not-allowed", fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap" }}
+                  onClick={() => {
+                    const val = taskInputRef.current?.value || ""
+                    if (!val.trim()) return
+                    openAiModal(val)
+                  }}
+                  style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "8px", padding: "8px 14px", cursor: "pointer", fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap" }}
                 >🤖 AI分解</button>
-                <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask(taskText)}>+</button>
+                <button
+                  className={`add-btn add-btn-${accentCls}`}
+                  onClick={() => {
+                    const val = taskInputRef.current?.value || ""
+                    if (!val.trim()) return
+                    addTask(val)
+                    if (taskInputRef.current) taskInputRef.current.value = ""
+                  }}
+                >+</button>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <select value={taskPriority} onChange={e => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}>
