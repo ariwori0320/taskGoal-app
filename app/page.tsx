@@ -212,12 +212,14 @@ export default function Home() {
   function openAiModal(taskName: string, parentId: string | null = null) {
     setAiTask(taskName)
     setAiParentId(parentId)
-    setChatMsgs([])
     setSuggestions([])
     setChatInput("")
     setAiModal(true)
-    // 自動で最初の分解を実行
-    startAiChat(taskName, [])
+    // 最初のメッセージを案内として表示（自動実行しない）
+    setChatMsgs([{
+      role: "assistant",
+      content: `「${taskName}」のタスク分解をお手伝いします！\n\n下のテキストボックスに指示を入力して「送信」を押してください。\n\n例：\n・「細かく分解して」\n・「3ステップで分けて」\n・「今日中にできる粒度にして」`,
+    }])
   }
 
   async function startAiChat(taskName: string, history: ChatMsg[]) {
