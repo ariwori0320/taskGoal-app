@@ -1,49 +1,47 @@
-import { NextResponse } from "next/server"
-import Anthropic from "@anthropic-ai/sdk"
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+export const runtime = "edge"
 
 export async function POST(req: Request) {
   const { task, messages } = await req.json()
-  if (!task?.trim()) return NextResponse.json({ error: "task required" }, { status: 400 })
+  if (!task?.trim()) return Response.json({ error: "task required" }, { status: 400 })
 
-  const systemPrompt = `あなたはタスク分解の専門家です。ユーザーのタスクを「すぐに実行できる粒度」に分解します。
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return Response.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 })
 
-重要なルール：
-- 各サブタスクは「自分が実際に動いている場面を頭の中で映像として再生できる」レベルに具体的に
-- 抽象的な表現（「調査する」「考える」）ではなく、具体的な行動（「〇〇のサイトを開く」「メモ帳に書き出す」）
-- 1つのサブタスクは5分以内でできる粒度が理想
-- ユーザーとの対話を通じてどんどん具体化していく`
-
-  const chatMessages = messages && messages.length > 0
+  const history = messages && messages.length > 0
     ? messages
     : [{
-        role: "user" as const,
-        content: `「${task}」というタスクをすぐに実行できる粒度のサブタスクに分解してください。まず何をしてくれるか簡単に説明してから、具体的なステップをJSON配列で提示してください。
-
-形式：
-説明文（1〜2文）
-
-\`\`\`json
-["ステップ1", "ステップ2", ...]
-\`\`\``
+        role: "user",
+        content: `「${task}」というタスクをすぐ実行できる粒度のサブタスクに分解してください。\n\n形式：説明文（1〜2文）の後にJSONブロックで提示\n\`\`\`json\n["ステップ1", "ステップ2", ...]\n\`\`\``
       }]
 
-  const response = await client.messages.create({
-    model: "claude-3-5-haiku-20241022",
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages: chatMessages,
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-3-5-haiku-20241022",
+      max_tokens: 512,
+      system: "あなたはタスク分解の専門家です。各サブタスクは「頭の中で映像として再生できる」レベルに具体的にしてください。",
+      messages: history,
+    }),
   })
 
-  const text = response.content[0].type === "text" ? response.content[0].text : ""
+  if (!res.ok) {
+    const err = await res.text()
+    return Response.json({ error: err }, { status: 500 })
+  }
 
-  // JSONブロックを抽出
+  const data = await res.json()
+  const text = data.content?.[0]?.text ?? ""
+
   const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/)
   let suggestions: string[] = []
   if (jsonMatch) {
     try { suggestions = JSON.parse(jsonMatch[1]) } catch {}
   }
 
-  return NextResponse.json({ text, suggestions })
+  return Response.json({ text, suggestions })
 }
