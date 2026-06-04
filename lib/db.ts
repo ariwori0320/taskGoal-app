@@ -1,7 +1,7 @@
 const SUPABASE_URL = "https://giormjyjrdyzcbsrmoeb.supabase.co/rest/v1"
 
 function getHeaders() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  const key = process.env.SB_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
   return {
     "apikey": key,
     "Authorization": `Bearer ${key}`,
