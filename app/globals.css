@@ -101,8 +101,16 @@ body {
 
 @media (max-width: 720px) {
   .container { grid-template-columns: 1fr; padding: 16px; }
-  .mode-btn { padding: 6px 12px; font-size: 13px; }
+  .mode-btn { padding: 6px 10px; font-size: 12px; }
   .user-name { display: none; }
+  .header { padding: 0 12px; height: 52px; }
+  .stats { padding: 12px 16px; }
+  .stat-num { font-size: 22px; }
+  .stat-label { font-size: 10px; }
+  .card-header { padding: 12px 14px; }
+  .task-item { padding: 10px 12px; }
+  .goal-item { padding: 12px 14px; }
+  .filter-tabs { padding: 8px 14px 0; }
 }
 
 /* Stats */
