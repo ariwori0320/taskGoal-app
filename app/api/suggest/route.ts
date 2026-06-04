@@ -4,36 +4,46 @@ import Anthropic from "@anthropic-ai/sdk"
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function POST(req: Request) {
-  const { task } = await req.json()
+  const { task, messages } = await req.json()
   if (!task?.trim()) return NextResponse.json({ error: "task required" }, { status: 400 })
 
-  const message = await client.messages.create({
+  const systemPrompt = `あなたはタスク分解の専門家です。ユーザーのタスクを「すぐに実行できる粒度」に分解します。
+
+重要なルール：
+- 各サブタスクは「自分が実際に動いている場面を頭の中で映像として再生できる」レベルに具体的に
+- 抽象的な表現（「調査する」「考える」）ではなく、具体的な行動（「〇〇のサイトを開く」「メモ帳に書き出す」）
+- 1つのサブタスクは5分以内でできる粒度が理想
+- ユーザーとの対話を通じてどんどん具体化していく`
+
+  const chatMessages = messages && messages.length > 0
+    ? messages
+    : [{
+        role: "user" as const,
+        content: `「${task}」というタスクをすぐに実行できる粒度のサブタスクに分解してください。まず何をしてくれるか簡単に説明してから、具体的なステップをJSON配列で提示してください。
+
+形式：
+説明文（1〜2文）
+
+\`\`\`json
+["ステップ1", "ステップ2", ...]
+\`\`\``
+      }]
+
+  const response = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 512,
-    messages: [
-      {
-        role: "user",
-        content: `以下のタスクを「5秒で次の一手が選べる」レベルの具体的なサブタスクに分解してください。
-
-タスク：「${task}」
-
-条件：
-- 各サブタスクは「自分が動いている場面を頭の中で映像として再生できる」レベルに具体的に
-- 3〜5個のサブタスクを提案
-- 各サブタスクは短く（15文字以内）
-- JSON配列のみで返す（説明文不要）
-
-例：["参考記事を3本開く", "構成をメモに書く", "AIに下書きを入力する", "修正して投稿する"]
-
-JSON配列のみ返してください：`,
-      },
-    ],
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages: chatMessages,
   })
 
-  const text = message.content[0].type === "text" ? message.content[0].text : "[]"
-  try {
-    return NextResponse.json({ suggestions: JSON.parse(text.trim()) })
-  } catch {
-    return NextResponse.json({ suggestions: [] })
+  const text = response.content[0].type === "text" ? response.content[0].text : ""
+
+  // JSONブロックを抽出
+  const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/)
+  let suggestions: string[] = []
+  if (jsonMatch) {
+    try { suggestions = JSON.parse(jsonMatch[1]) } catch {}
   }
+
+  return NextResponse.json({ text, suggestions })
 }

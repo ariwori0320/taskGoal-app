@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useRouter } from "next/navigation"
 
 type Mode = "work" | "private"
 type Priority = "high" | "mid" | "low"
 type Filter = "all" | "active" | "done"
+type Tab = "tasks" | "goals" | "memos"
 
 interface Task {
   id: string
@@ -12,6 +14,7 @@ interface Task {
   priority: Priority
   due_date: string | null
   done: boolean
+  parent_id: string | null
   created_at: string
 }
 
@@ -23,123 +26,111 @@ interface Goal {
   created_at: string
 }
 
-interface ModeData {
-  tasks: Task[]
-  goals: Goal[]
+interface Memo {
+  id: string
+  title: string
+  content: string
+  updated_at: string
 }
 
-function fmtDue(dateStr: string | null): string {
-  if (!dateStr) return ""
-  const d = new Date(dateStr + "T00:00:00")
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  const diff = Math.round((d.getTime() - now.getTime()) / 86400000)
+interface ChatMsg {
+  role: "user" | "assistant"
+  content: string
+}
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2) }
+
+function fmtDue(d: string | null) {
+  if (!d) return ""
+  const date = new Date(d + "T00:00:00")
+  const now = new Date(); now.setHours(0,0,0,0)
+  const diff = Math.round((date.getTime() - now.getTime()) / 86400000)
   if (diff === 0) return "今日"
   if (diff === 1) return "明日"
   if (diff < 0) return `${Math.abs(diff)}日超過`
   return `${diff}日後`
 }
 
-function isOverdue(dateStr: string | null): boolean {
-  if (!dateStr) return false
-  const d = new Date(dateStr + "T00:00:00")
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  return d < now
+function isOverdue(d: string | null) {
+  if (!d) return false
+  const date = new Date(d + "T00:00:00")
+  const now = new Date(); now.setHours(0,0,0,0)
+  return date < now
 }
 
 export default function Home() {
+  const router = useRouter()
   const [mode, setMode] = useState<Mode>("work")
-  const [data, setData] = useState<Record<Mode, ModeData>>({
-    work: { tasks: [], goals: [] },
-    private: { tasks: [], goals: [] },
-  })
-  const [filter, setFilter] = useState<Record<Mode, Filter>>({ work: "all", private: "all" })
+  const [tab, setTab] = useState<Tab>("tasks")
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [memos, setMemos] = useState<Memo[]>([])
   const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<Filter>("all")
 
   // Task form
   const [taskText, setTaskText] = useState("")
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
   const [taskDue, setTaskDue] = useState("")
 
-  // AI サブタスク提案
-  const [suggestions, setSuggestions] = useState<string[]>([])
-  const [suggesting, setSuggesting] = useState(false)
-
   // Goal form
   const [goalText, setGoalText] = useState("")
   const [goalDue, setGoalDue] = useState("")
 
-  // Debounce goal pct updates
+  // Memo
+  const [editMemo, setEditMemo] = useState<Memo | null>(null)
+  const [memoTitle, setMemoTitle] = useState("")
+  const [memoContent, setMemoContent] = useState("")
+
+  // AI Chat modal
+  const [aiModal, setAiModal] = useState(false)
+  const [aiTask, setAiTask] = useState("")
+  const [aiParentId, setAiParentId] = useState<string | null>(null)
+  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([])
+  const [chatInput, setChatInput] = useState("")
+  const [aiLoading, setAiLoading] = useState(false)
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // Inline child task input
+  const [addingChildTo, setAddingChildTo] = useState<string | null>(null)
+  const [childText, setChildText] = useState("")
+
+  // Pct debounce
   const pctTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [wt, wg, pt, pg] = await Promise.all([
-        fetch("/api/tasks?mode=work").then((r) => r.json()),
-        fetch("/api/goals?mode=work").then((r) => r.json()),
-        fetch("/api/tasks?mode=private").then((r) => r.json()),
-        fetch("/api/goals?mode=private").then((r) => r.json()),
+      const [t, g, m] = await Promise.all([
+        fetch(`/api/tasks?mode=${mode}`).then(r => r.json()),
+        fetch(`/api/goals?mode=${mode}`).then(r => r.json()),
+        fetch(`/api/memos?mode=${mode}`).then(r => r.json()),
       ])
-      setData({
-        work: { tasks: Array.isArray(wt) ? wt : [], goals: Array.isArray(wg) ? wg : [] },
-        private: { tasks: Array.isArray(pt) ? pt : [], goals: Array.isArray(pg) ? pg : [] },
-      })
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+      setTasks(Array.isArray(t) ? t : [])
+      setGoals(Array.isArray(g) ? g : [])
+      setMemos(Array.isArray(m) ? m : [])
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
+  }, [mode])
 
-  useEffect(() => {
-    fetchAll()
-  }, [fetchAll])
+  useEffect(() => { fetchAll() }, [fetchAll])
 
-  // AI サブタスク提案
-  async function suggestSubtasks() {
-    if (!taskText.trim()) return
-    setSuggesting(true)
-    setSuggestions([])
-    const res = await fetch("/api/suggest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task: taskText }),
-    })
-    const data = await res.json()
-    setSuggestions(data.suggestions || [])
-    setSuggesting(false)
-  }
-
-  // Task actions
-  async function addTask(text?: string) {
-    const t = (text ?? taskText).trim()
-    if (!t) return
+  // ---- Task actions ----
+  async function addTask(text: string, parentId: string | null = null, priority: Priority = taskPriority, due: string = taskDue) {
+    if (!text.trim()) return
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: t, priority: taskPriority, due_date: taskDue || null, mode }),
+      body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId }),
     })
     const task: Task = await res.json()
-    setData((prev) => ({ ...prev, [mode]: { ...prev[mode], tasks: [task, ...prev[mode].tasks] } }))
-    if (!text) {
-      setTaskText("")
-      setTaskDue("")
-      setSuggestions([])
-    }
-  }
-
-  async function addAllSuggestions() {
-    for (const s of suggestions) await addTask(s)
-    setSuggestions([])
+    setTasks(prev => [task, ...prev])
+    if (!parentId) { setTaskText(""); setTaskDue("") }
   }
 
   async function toggleTask(id: string, done: boolean) {
-    setData((prev) => ({
-      ...prev,
-      [mode]: { ...prev[mode], tasks: prev[mode].tasks.map((t) => (t.id === id ? { ...t, done: !done } : t)) },
-    }))
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !done } : t))
     await fetch(`/api/tasks/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -148,14 +139,11 @@ export default function Home() {
   }
 
   async function deleteTask(id: string) {
-    setData((prev) => ({
-      ...prev,
-      [mode]: { ...prev[mode], tasks: prev[mode].tasks.filter((t) => t.id !== id) },
-    }))
+    setTasks(prev => prev.filter(t => t.id !== id && t.parent_id !== id))
     await fetch(`/api/tasks/${id}`, { method: "DELETE" })
   }
 
-  // Goal actions
+  // ---- Goal actions ----
   async function addGoal() {
     if (!goalText.trim()) return
     const res = await fetch("/api/goals", {
@@ -164,16 +152,12 @@ export default function Home() {
       body: JSON.stringify({ text: goalText, due_date: goalDue || null, mode }),
     })
     const goal: Goal = await res.json()
-    setData((prev) => ({ ...prev, [mode]: { ...prev[mode], goals: [goal, ...prev[mode].goals] } }))
-    setGoalText("")
-    setGoalDue("")
+    setGoals(prev => [goal, ...prev])
+    setGoalText(""); setGoalDue("")
   }
 
-  function updateGoalPctLocal(id: string, pct: number) {
-    setData((prev) => ({
-      ...prev,
-      [mode]: { ...prev[mode], goals: prev[mode].goals.map((g) => (g.id === id ? { ...g, pct } : g)) },
-    }))
+  function updateGoalPct(id: string, pct: number) {
+    setGoals(prev => prev.map(g => g.id === id ? { ...g, pct } : g))
     clearTimeout(pctTimers.current[id])
     pctTimers.current[id] = setTimeout(() => {
       fetch(`/api/goals/${id}`, {
@@ -185,259 +169,412 @@ export default function Home() {
   }
 
   async function deleteGoal(id: string) {
-    setData((prev) => ({
-      ...prev,
-      [mode]: { ...prev[mode], goals: prev[mode].goals.filter((g) => g.id !== id) },
-    }))
+    setGoals(prev => prev.filter(g => g.id !== id))
     await fetch(`/api/goals/${id}`, { method: "DELETE" })
   }
 
-  // Derived
-  const cur = data[mode]
-  const f = filter[mode]
-  const filteredTasks =
-    f === "active" ? cur.tasks.filter((t) => !t.done) : f === "done" ? cur.tasks.filter((t) => t.done) : cur.tasks
-  const activeCnt = cur.tasks.filter((t) => !t.done).length
-  const doneCnt = cur.tasks.filter((t) => t.done).length
-  const overdueCnt = cur.tasks.filter((t) => !t.done && isOverdue(t.due_date)).length
-  const avgGoal = cur.goals.length
-    ? Math.round(cur.goals.reduce((a, g) => a + g.pct, 0) / cur.goals.length)
-    : 0
+  // ---- Memo actions ----
+  async function saveMemo() {
+    if (editMemo) {
+      await fetch(`/api/memos/${editMemo.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: memoTitle, content: memoContent }),
+      })
+      setMemos(prev => prev.map(m => m.id === editMemo.id ? { ...m, title: memoTitle, content: memoContent } : m))
+    } else {
+      const res = await fetch("/api/memos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: memoTitle, content: memoContent, mode }),
+      })
+      const memo: Memo = await res.json()
+      setMemos(prev => [memo, ...prev])
+    }
+    setEditMemo(null); setMemoTitle(""); setMemoContent("")
+  }
 
-  const mc = mode // "work" | "private"
-  const accentCls = mc === "work" ? "work" : "private"
+  async function deleteMemo(id: string) {
+    setMemos(prev => prev.filter(m => m.id !== id))
+    await fetch(`/api/memos/${id}`, { method: "DELETE" })
+  }
 
-  if (loading && data.work.tasks.length === 0 && data.private.tasks.length === 0)
-    return <div className="loading">読み込み中...</div>
+  // ---- AI Chat ----
+  function openAiModal(taskName: string, parentId: string | null = null) {
+    setAiTask(taskName)
+    setAiParentId(parentId)
+    setChatMsgs([])
+    setSuggestions([])
+    setChatInput("")
+    setAiModal(true)
+    // 自動で最初の分解を実行
+    startAiChat(taskName, [])
+  }
+
+  async function startAiChat(taskName: string, history: ChatMsg[]) {
+    setAiLoading(true)
+    const res = await fetch("/api/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: taskName, messages: history.map(m => ({ role: m.role, content: m.content })) }),
+    })
+    const data = await res.json()
+    setChatMsgs(prev => [...prev, { role: "assistant", content: data.text }])
+    setSuggestions(data.suggestions || [])
+    setAiLoading(false)
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
+  }
+
+  async function sendChatMsg() {
+    if (!chatInput.trim() || aiLoading) return
+    const newMsg: ChatMsg = { role: "user", content: chatInput }
+    const newHistory = [...chatMsgs, newMsg]
+    setChatMsgs(newHistory)
+    setChatInput("")
+    setSuggestions([])
+    await startAiChat(aiTask, newHistory)
+  }
+
+  async function addSuggestionAsTask(text: string) {
+    await addTask(text, aiParentId, "mid", "")
+  }
+
+  async function addAllSuggestions() {
+    for (const s of suggestions) await addSuggestionAsTask(s)
+    setSuggestions([])
+  }
+
+  // ---- Derived ----
+  const accentCls = mode === "work" ? "work" : "private"
+  const parentTasks = tasks.filter(t => !t.parent_id)
+  const filteredParents = filter === "active" ? parentTasks.filter(t => !t.done)
+    : filter === "done" ? parentTasks.filter(t => t.done)
+    : parentTasks
+  const childrenOf = (id: string) => tasks.filter(t => t.parent_id === id)
+
+  const activeCnt = tasks.filter(t => !t.done && !t.parent_id).length
+  const doneCnt = tasks.filter(t => t.done && !t.parent_id).length
+  const overdueCnt = tasks.filter(t => !t.done && isOverdue(t.due_date)).length
+  const avgGoal = goals.length ? Math.round(goals.reduce((a, g) => a + g.pct, 0) / goals.length) : 0
+
+  // ---- Task Item Component ----
+  function TaskItem({ task, level = 0 }: { task: Task; level?: number }) {
+    const children = childrenOf(task.id)
+    const grandChildren = (cid: string) => tasks.filter(t => t.parent_id === cid)
+    const indent = level * 20
+
+    return (
+      <div>
+        <div className="task-item" style={{ paddingLeft: `${20 + indent}px` }}>
+          <div className={`task-check ${task.done ? "task-check-done" : ""}`} onClick={() => toggleTask(task.id, task.done)}>
+            {task.done ? "✓" : ""}
+          </div>
+          <div className={`priority-dot p-${task.priority}`} />
+          <div className={`task-text ${task.done ? "task-text-done" : ""}`} style={{ flex: 1 }}>{task.text}</div>
+          {task.due_date && (
+            <div className={`task-due ${!task.done && isOverdue(task.due_date) ? "task-due-overdue" : ""}`}>
+              {fmtDue(task.due_date)}
+            </div>
+          )}
+          {level < 2 && (
+            <button
+              onClick={() => { setAddingChildTo(task.id); setChildText("") }}
+              style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "16px", padding: "2px 4px" }}
+              title="サブタスクを追加"
+            >＋</button>
+          )}
+          <button
+            onClick={() => openAiModal(task.text, task.id)}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 4px" }}
+            title="AIで分解"
+          >🤖</button>
+          <button className="del-btn" onClick={() => deleteTask(task.id)}>×</button>
+        </div>
+
+        {/* インラインでサブタスク追加 */}
+        {addingChildTo === task.id && (
+          <div style={{ display: "flex", gap: "6px", padding: `6px 12px 6px ${20 + indent + 20}px`, background: "#f9fafb" }}>
+            <input
+              autoFocus
+              value={childText}
+              onChange={e => setChildText(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter") { addTask(childText, task.id, "mid", ""); setAddingChildTo(null) }
+                if (e.key === "Escape") setAddingChildTo(null)
+              }}
+              placeholder="サブタスクを入力..."
+              style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", outline: "none" }}
+            />
+            <button
+              onClick={() => { addTask(childText, task.id, "mid", ""); setAddingChildTo(null) }}
+              style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "13px" }}
+            >追加</button>
+            <button onClick={() => setAddingChildTo(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280" }}>×</button>
+          </div>
+        )}
+
+        {/* 子タスク */}
+        {children.map(child => (
+          <div key={child.id}>
+            <TaskItem task={child} level={level + 1} />
+            {/* 孫タスク */}
+            {grandChildren(child.id).map(grand => (
+              <TaskItem key={grand.id} task={grand} level={level + 2} />
+            ))}
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <>
+      {/* Header */}
       <header className="header">
         <div className="logo">📋 MyFlow</div>
-        <div className="header-right">
-          <div className="mode-toggle">
-            <button
-              className={`mode-btn ${mode === "work" ? "active-work" : ""}`}
-              onClick={() => setMode("work")}
-            >
-              💼 仕事
-            </button>
-            <button
-              className={`mode-btn ${mode === "private" ? "active-priv" : ""}`}
-              onClick={() => setMode("private")}
-            >
-              🏠 プライベート
-            </button>
-          </div>
-          <div className="user-area"></div>
+        <div className="mode-toggle">
+          <button className={`mode-btn ${mode === "work" ? "active-work" : ""}`} onClick={() => setMode("work")}>💼 仕事</button>
+          <button className={`mode-btn ${mode === "private" ? "active-priv" : ""}`} onClick={() => setMode("private")}>🏠 プライベート</button>
         </div>
       </header>
 
-      <div className="container">
-        {/* Stats */}
+      {/* Stats */}
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 24px 0" }}>
         <div className="stats">
-          <div className="stat">
-            <div className={`stat-num stat-num-${accentCls}`}>{activeCnt}</div>
-            <div className="stat-label">未完了タスク</div>
-          </div>
-          <div className="stat">
-            <div className={`stat-num stat-num-${accentCls}`}>{doneCnt}</div>
-            <div className="stat-label">完了タスク</div>
-          </div>
-          <div className="stat">
-            <div className={`stat-num stat-num-${accentCls}`}>{overdueCnt}</div>
-            <div className="stat-label">期限超過</div>
-          </div>
-          <div className="stat">
-            <div className={`stat-num stat-num-${accentCls}`}>{avgGoal}%</div>
-            <div className="stat-label">目標平均進捗</div>
-          </div>
-        </div>
-
-        {/* Tasks */}
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">
-              <span>✅</span> タスク
-            </div>
-            <span className={`badge badge-${accentCls}`}>
-              {mc === "work" ? "仕事" : "プライベート"}
-            </span>
-          </div>
-          {/* タスク入力 */}
-          <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <input
-                className="input-main"
-                type="text"
-                placeholder="新しいタスクを追加..."
-                value={taskText}
-                onChange={(e) => { setTaskText(e.target.value); setSuggestions([]) }}
-                onKeyDown={(e) => e.key === "Enter" && addTask()}
-                style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }}
-              />
-              <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask()}>+</button>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}>
-                <option value="high">🔴 高</option>
-                <option value="mid">🟠 中</option>
-                <option value="low">🟢 低</option>
-              </select>
-              <input
-                type="date"
-                value={taskDue}
-                onChange={(e) => setTaskDue(e.target.value)}
-                style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}
-              />
-              <button
-                onClick={suggestSubtasks}
-                disabled={suggesting || !taskText.trim()}
-                style={{
-                  background: suggesting ? "#e5e7eb" : "#6366f1",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  padding: "6px 14px",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: suggesting || !taskText.trim() ? "not-allowed" : "pointer",
-                  opacity: !taskText.trim() ? 0.5 : 1,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {suggesting ? "⏳ AI考え中..." : "🤖 AI分解"}
-              </button>
-            </div>
-          </div>
-
-          {/* AI サブタスク提案 */}
-          {suggesting && (
-            <div style={{ padding: "12px 20px", background: "#eef2ff", fontSize: "13px", color: "#4338ca", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span>⏳</span> AIがタスクを映像化できるステップに分解しています...
-            </div>
-          )}
-          {suggestions.length > 0 && (
-            <div className="suggest-box">
-              <div className="suggest-header">
-                <span>🎬 映像化できるステップに分解しました</span>
-                <button className="suggest-all-btn" onClick={addAllSuggestions}>すべて追加</button>
-              </div>
-              {suggestions.map((s, i) => (
-                <div className="suggest-item" key={i}>
-                  <span className="suggest-text">{s}</span>
-                  <button className="suggest-add" onClick={() => addTask(s)}>+ 追加</button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="filter-tabs">
-            {(["all", "active", "done"] as Filter[]).map((ff) => (
-              <button
-                key={ff}
-                className={`filter-tab ${f === ff ? "active" : ""}`}
-                onClick={() => setFilter((prev) => ({ ...prev, [mode]: ff }))}
-              >
-                {ff === "all" ? "すべて" : ff === "active" ? "未完了" : "完了"}
-              </button>
-            ))}
-          </div>
-
-          <div className="list-body">
-            {loading ? (
-              <div className="empty-msg">読み込み中...</div>
-            ) : filteredTasks.length === 0 ? (
-              <div className="empty-msg">タスクがありません</div>
-            ) : (
-              filteredTasks.map((t) => (
-                <div className="task-item" key={t.id}>
-                  <div
-                    className={`task-check ${t.done ? "task-check-done" : ""}`}
-                    onClick={() => toggleTask(t.id, t.done)}
-                  >
-                    {t.done ? "✓" : ""}
-                  </div>
-                  <div className={`priority-dot p-${t.priority}`} />
-                  <div className={`task-text ${t.done ? "task-text-done" : ""}`}>{t.text}</div>
-                  {t.due_date && (
-                    <div className={`task-due ${!t.done && isOverdue(t.due_date) ? "task-due-overdue" : ""}`}>
-                      {fmtDue(t.due_date)}
-                    </div>
-                  )}
-                  <button className="del-btn" onClick={() => deleteTask(t.id)}>
-                    ×
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Goals */}
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">
-              <span>🎯</span> 目標
-            </div>
-            <span className={`badge badge-${accentCls}`}>
-              {mc === "work" ? "仕事" : "プライベート"}
-            </span>
-          </div>
-          <div className="input-row">
-            <input
-              className="input-main"
-              type="text"
-              placeholder="新しい目標を追加..."
-              value={goalText}
-              onChange={(e) => setGoalText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addGoal()}
-            />
-            <input
-              className="input-date"
-              type="date"
-              value={goalDue}
-              onChange={(e) => setGoalDue(e.target.value)}
-            />
-            <button className={`add-btn add-btn-${accentCls}`} onClick={addGoal}>
-              +
-            </button>
-          </div>
-
-          <div className="list-body">
-            {loading ? (
-              <div className="empty-msg">読み込み中...</div>
-            ) : cur.goals.length === 0 ? (
-              <div className="empty-msg">目標がありません</div>
-            ) : (
-              cur.goals.map((g) => (
-                <div className="goal-item" key={g.id}>
-                  <div className="goal-top">
-                    <div className={`goal-name ${g.pct >= 100 ? "goal-name-done" : ""}`}>{g.text}</div>
-                    <div className={`goal-pct goal-pct-${accentCls}`}>{g.pct}%</div>
-                    <button className="del-btn" onClick={() => deleteGoal(g.id)}>
-                      ×
-                    </button>
-                  </div>
-                  <div className="progress-bar">
-                    <div className={`progress-fill progress-${accentCls}`} style={{ width: `${g.pct}%` }} />
-                  </div>
-                  <div className="goal-controls">
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={g.pct}
-                      onChange={(e) => updateGoalPctLocal(g.id, Number(e.target.value))}
-                    />
-                    {g.due_date && <div className="goal-due">{fmtDue(g.due_date)}</div>}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          <div className="stat"><div className={`stat-num stat-num-${accentCls}`}>{activeCnt}</div><div className="stat-label">未完了</div></div>
+          <div className="stat"><div className={`stat-num stat-num-${accentCls}`}>{doneCnt}</div><div className="stat-label">完了</div></div>
+          <div className="stat"><div className={`stat-num stat-num-${accentCls}`}>{overdueCnt}</div><div className="stat-label">期限超過</div></div>
+          <div className="stat"><div className={`stat-num stat-num-${accentCls}`}>{avgGoal}%</div><div className="stat-label">目標進捗</div></div>
         </div>
       </div>
+
+      {/* Tab + Content */}
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 24px" }}>
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: "4px", marginBottom: "16px", background: "#f3f4f6", borderRadius: "10px", padding: "4px", width: "fit-content" }}>
+          {([["tasks", "✅ タスク"], ["goals", "🎯 目標"], ["memos", "📝 メモ"]] as [Tab, string][]).map(([t, label]) => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: "8px 20px", borderRadius: "8px", border: "none", cursor: "pointer", fontWeight: 600, fontSize: "14px",
+              background: tab === t ? (mode === "work" ? "#2563eb" : "#7c3aed") : "transparent",
+              color: tab === t ? "white" : "#6b7280",
+              transition: "all .2s",
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {/* ===== TASKS TAB ===== */}
+        {tab === "tasks" && (
+          <div className="card">
+            {/* AI説明バナー */}
+            <div style={{ padding: "10px 20px", background: "#eef2ff", borderBottom: "1px solid #c7d2fe", fontSize: "12px", color: "#4338ca" }}>
+              💡 <strong>🤖 AI分解</strong>：タスクを「すぐ動ける粒度」に分解します。各タスク横の🤖でサブタスクとして追加、対話で細かく調整できます。
+            </div>
+
+            {/* 入力エリア */}
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }}
+                  placeholder="親タスクを追加..."
+                  value={taskText}
+                  onChange={e => setTaskText(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addTask(taskText)}
+                />
+                <button
+                  onClick={() => openAiModal(taskText)}
+                  disabled={!taskText.trim()}
+                  style={{ background: taskText.trim() ? "#6366f1" : "#e5e7eb", color: taskText.trim() ? "white" : "#9ca3af", border: "none", borderRadius: "8px", padding: "8px 14px", cursor: taskText.trim() ? "pointer" : "not-allowed", fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap" }}
+                >🤖 AI分解</button>
+                <button className={`add-btn add-btn-${accentCls}`} onClick={() => addTask(taskText)}>+</button>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <select value={taskPriority} onChange={e => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}>
+                  <option value="high">🔴 高</option>
+                  <option value="mid">🟠 中</option>
+                  <option value="low">🟢 低</option>
+                </select>
+                <input type="date" value={taskDue} onChange={e => setTaskDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }} />
+              </div>
+            </div>
+
+            {/* フィルター */}
+            <div className="filter-tabs">
+              {(["all", "active", "done"] as Filter[]).map(f => (
+                <button key={f} className={`filter-tab ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
+                  {f === "all" ? "すべて" : f === "active" ? "未完了" : "完了"}
+                </button>
+              ))}
+            </div>
+
+            {/* タスクリスト */}
+            <div className="list-body">
+              {loading ? <div className="empty-msg">読み込み中...</div>
+                : filteredParents.length === 0 ? <div className="empty-msg">タスクがありません</div>
+                : filteredParents.map(t => <TaskItem key={t.id} task={t} />)}
+            </div>
+          </div>
+        )}
+
+        {/* ===== GOALS TAB ===== */}
+        {tab === "goals" && (
+          <div className="card">
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "8px" }}>
+              <input
+                style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }}
+                placeholder="新しい目標を追加..."
+                value={goalText}
+                onChange={e => setGoalText(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addGoal()}
+              />
+              <input type="date" value={goalDue} onChange={e => setGoalDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px", fontSize: "13px", outline: "none" }} />
+              <button className={`add-btn add-btn-${accentCls}`} onClick={addGoal}>+</button>
+            </div>
+            <div className="list-body">
+              {loading ? <div className="empty-msg">読み込み中...</div>
+                : goals.length === 0 ? <div className="empty-msg">目標がありません</div>
+                : goals.map(g => (
+                  <div key={g.id} className="goal-item">
+                    <div className="goal-top">
+                      <div className={`goal-name ${g.pct >= 100 ? "goal-name-done" : ""}`}>{g.text}</div>
+                      <div className={`goal-pct goal-pct-${accentCls}`}>{g.pct}%</div>
+                      <button className="del-btn" onClick={() => deleteGoal(g.id)}>×</button>
+                    </div>
+                    <div className="progress-bar"><div className={`progress-fill progress-${accentCls}`} style={{ width: `${g.pct}%` }} /></div>
+                    <div className="goal-controls">
+                      <input type="range" min={0} max={100} value={g.pct} onChange={e => updateGoalPct(g.id, Number(e.target.value))} />
+                      {g.due_date && <div className="goal-due">{fmtDue(g.due_date)}</div>}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===== MEMOS TAB ===== */}
+        {tab === "memos" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+            {/* メモ一覧 */}
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title"><span>📝</span> メモ一覧</div>
+                <button
+                  onClick={() => { setEditMemo(null); setMemoTitle(""); setMemoContent("") }}
+                  className={`add-btn add-btn-${accentCls}`}
+                  style={{ fontSize: "14px", padding: "6px 12px" }}
+                >+ 新規</button>
+              </div>
+              <div className="list-body">
+                {memos.length === 0 ? <div className="empty-msg">メモがありません</div>
+                  : memos.map(m => (
+                    <div key={m.id} onClick={() => { setEditMemo(m); setMemoTitle(m.title); setMemoContent(m.content) }}
+                      style={{ padding: "12px 20px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", transition: "background .1s" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "#f9fafb")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "white")}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ fontWeight: 600, fontSize: "14px" }}>{m.title || "（無題）"}</div>
+                        <button className="del-btn" onClick={e => { e.stopPropagation(); deleteMemo(m.id) }}>×</button>
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.content}</div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {/* メモ編集 */}
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title"><span>✏️</span> {editMemo ? "編集" : "新規メモ"}</div>
+                <button onClick={saveMemo} style={{ background: mode === "work" ? "#2563eb" : "#7c3aed", color: "white", border: "none", borderRadius: "8px", padding: "6px 16px", cursor: "pointer", fontWeight: 600, fontSize: "13px" }}>保存</button>
+              </div>
+              <div style={{ padding: "14px 20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                <input
+                  value={memoTitle}
+                  onChange={e => setMemoTitle(e.target.value)}
+                  placeholder="タイトル"
+                  style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "15px", fontWeight: 600, outline: "none" }}
+                />
+                <textarea
+                  value={memoContent}
+                  onChange={e => setMemoContent(e.target.value)}
+                  placeholder="メモを入力..."
+                  style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "10px 12px", fontSize: "14px", outline: "none", minHeight: "300px", resize: "vertical", lineHeight: "1.6" }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ===== AI CHAT MODAL ===== */}
+      {aiModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div style={{ background: "white", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: "600px", height: "85vh", display: "flex", flexDirection: "column" }}>
+            {/* Modal Header */}
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "16px" }}>🤖 AI タスク分解</div>
+                <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>「{aiTask}」</div>
+              </div>
+              <button onClick={() => setAiModal(false)} style={{ border: "none", background: "none", fontSize: "24px", cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+
+            {/* Chat Messages */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px" }}>
+              {chatMsgs.map((m, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                  <div style={{
+                    maxWidth: "85%", padding: "10px 14px", borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                    background: m.role === "user" ? "#6366f1" : "#f3f4f6",
+                    color: m.role === "user" ? "white" : "#111827",
+                    fontSize: "13px", lineHeight: "1.6", whiteSpace: "pre-wrap",
+                  }}>{m.content}</div>
+                </div>
+              ))}
+
+              {aiLoading && (
+                <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                  <div style={{ background: "#f3f4f6", padding: "10px 14px", borderRadius: "16px 16px 16px 4px", fontSize: "13px", color: "#6b7280" }}>
+                    ⏳ AIがタスクを実行できる粒度に分解しています...
+                  </div>
+                </div>
+              )}
+
+              {/* 提案ボタン */}
+              {suggestions.length > 0 && !aiLoading && (
+                <div style={{ background: "#eef2ff", borderRadius: "12px", padding: "12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 600, color: "#4338ca" }}>タスクに追加しますか？</span>
+                    <button onClick={addAllSuggestions} style={{ background: "#4338ca", color: "white", border: "none", borderRadius: "6px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>すべて追加</button>
+                  </div>
+                  {suggestions.map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderTop: i > 0 ? "1px solid #c7d2fe" : "none" }}>
+                      <span style={{ fontSize: "13px", color: "#374151" }}>{s}</span>
+                      <button onClick={() => addSuggestionAsTask(s)} style={{ background: "white", color: "#6366f1", border: "1px solid #6366f1", borderRadius: "6px", padding: "3px 10px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>+ 追加</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat Input */}
+            <div style={{ padding: "12px 16px", borderTop: "1px solid #e5e7eb", display: "flex", gap: "8px" }}>
+              <input
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && sendChatMsg()}
+                placeholder="「もっと具体的に」「最初のステップを細かく」など..."
+                style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "10px", padding: "10px 14px", fontSize: "14px", outline: "none" }}
+              />
+              <button onClick={sendChatMsg} disabled={!chatInput.trim() || aiLoading}
+                style={{ background: chatInput.trim() && !aiLoading ? "#6366f1" : "#e5e7eb", color: chatInput.trim() && !aiLoading ? "white" : "#9ca3af", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: chatInput.trim() && !aiLoading ? "pointer" : "not-allowed", fontWeight: 600 }}>
+                送信
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
