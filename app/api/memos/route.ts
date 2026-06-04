@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getSupabase } from "@/lib/db"
+import { db } from "@/lib/db"
 
 const USER_ID = "default"
 
@@ -8,26 +8,24 @@ function uid() {
 }
 
 export async function GET(req: Request) {
-  const mode = new URL(req.url).searchParams.get("mode") || "work"
-  const { data, error } = await getSupabase()
-    .from("memos")
-    .select("*")
-    .eq("user_id", USER_ID)
-    .eq("mode", mode)
-    .order("updated_at", { ascending: false })
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  try {
+    const mode = new URL(req.url).searchParams.get("mode") || "work"
+    const data = await db.select("memos", { user_id: USER_ID, mode })
+    return NextResponse.json(data)
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
 }
 
 export async function POST(req: Request) {
-  const { title, content, mode } = await req.json()
-  const { data, error } = await getSupabase()
-    .from("memos")
-    .insert({ id: uid(), user_id: USER_ID, mode, title: title || "", content: content || "" })
-    .select()
-    .single()
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { status: 201 })
+  try {
+    const { title, content, mode } = await req.json()
+    const memo = await db.insert("memos", {
+      id: uid(), user_id: USER_ID, mode: mode || "work",
+      title: title || "", content: content || "",
+    })
+    return NextResponse.json(memo, { status: 201 })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
 }
