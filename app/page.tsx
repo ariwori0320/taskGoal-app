@@ -342,7 +342,7 @@ export default function Home() {
     <>
       {/* Header */}
       <header className="header">
-        <img src="/logo.png" alt="MyFlow" style={{ height: "36px", objectFit: "contain" }} />
+        <img src="/logo.png" alt="MyFlow" style={{ height: "44px", objectFit: "contain" }} />
         <div className="mode-toggle">
           <button className={`mode-btn ${mode === "work" ? "active-work" : ""}`} onClick={() => setMode("work")}>💼 仕事</button>
           <button className={`mode-btn ${mode === "private" ? "active-priv" : ""}`} onClick={() => setMode("private")}>🏠 プライベート</button>
