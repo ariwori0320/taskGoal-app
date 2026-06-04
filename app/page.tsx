@@ -118,16 +118,24 @@ export default function Home() {
   useEffect(() => { fetchAll() }, [fetchAll])
 
   // ---- Task actions ----
-  async function addTask(text: string, parentId: string | null = null, priority: Priority = taskPriority, due: string = taskDue) {
+  async function addTask(text: string, parentId: string | null = null, priority: Priority = "mid", due: string = "") {
     if (!text.trim()) return
-    const res = await fetch("/api/tasks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId }),
-    })
-    const task: Task = await res.json()
-    setTasks(prev => [task, ...prev])
-    if (!parentId) { setTaskText(""); setTaskDue("") }
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        alert(`タスク追加エラー: ${json.error || res.status}`)
+        return
+      }
+      // 追加後に再取得して確実に反映
+      await fetchAll()
+    } catch (e) {
+      alert(`通信エラー: ${e}`)
+    }
   }
 
   async function toggleTask(id: string, done: boolean) {
