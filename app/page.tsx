@@ -18,11 +18,21 @@ interface Task {
   memo: string | null
   mode: string
   is_recurring: boolean
+  recurring_days: string  // "" = 毎日, "1,3,5" = 月水金 (0=日,1=月,...,6=土)
   recurring_done_date: string | null
   created_at: string
 }
 
+const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"]
+
 function today() { return new Date().toISOString().split("T")[0] }
+
+function isRecurringToday(task: Task): boolean {
+  if (!task.is_recurring) return false
+  if (!task.recurring_days) return true // 毎日
+  const days = task.recurring_days.split(",").map(Number)
+  return days.includes(new Date().getDay())
+}
 
 function isTaskDone(task: Task): boolean {
   if (task.is_recurring) return task.recurring_done_date === today()
@@ -91,6 +101,7 @@ export default function Home() {
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
   const [taskDue, setTaskDue] = useState("")
   const [taskRecurring, setTaskRecurring] = useState(false)
+  const [taskRecurringDays, setTaskRecurringDays] = useState<number[]>([]) // [] = 毎日
 
   // 日付フィルター
   const [dateFilter, setDateFilter] = useState<string>("")
@@ -151,7 +162,7 @@ export default function Home() {
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId, is_recurring: parentId ? false : taskRecurring }),
+        body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId, is_recurring: parentId ? false : taskRecurring, recurring_days: parentId ? "" : taskRecurringDays.join(",") }),
       })
       const json = await res.json()
       if (!res.ok) {
@@ -326,7 +337,11 @@ export default function Home() {
 
   // ---- Derived ----
   const accentCls = mode === "work" ? "work" : "private"
-  const parentTasks = tasks.filter(t => !t.parent_id)
+  const parentTasks = tasks.filter(t => {
+    if (t.parent_id) return false
+    if (t.is_recurring) return isRecurringToday(t) // 今日が対象曜日の時だけ表示
+    return true
+  })
   const dateFiltered = dateFilter
     ? parentTasks.filter(t => t.due_date === dateFilter || t.is_recurring)
     : parentTasks
@@ -359,7 +374,9 @@ export default function Home() {
 
           {/* 繰り返しバッジ */}
           {task.is_recurring && (
-            <span style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", fontWeight: 700, flexShrink: 0 }}>🔁</span>
+            <span style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", fontWeight: 700, flexShrink: 0 }}>
+              🔁{task.recurring_days ? task.recurring_days.split(",").map(d => DAY_LABELS[Number(d)]).join("・") : "毎日"}
+            </span>
           )}
 
           {/* 優先度バッジ */}
@@ -563,10 +580,28 @@ export default function Home() {
                 </select>
                 <input type="date" value={taskDue} onChange={e => setTaskDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
-                  <input type="checkbox" checked={taskRecurring} onChange={e => setTaskRecurring(e.target.checked)} />
-                  🔁 毎日
+                  <input type="checkbox" checked={taskRecurring} onChange={e => { setTaskRecurring(e.target.checked); if (!e.target.checked) setTaskRecurringDays([]) }} />
+                  🔁 繰り返し
                 </label>
               </div>
+
+              {/* 曜日選択 */}
+              {taskRecurring && (
+                <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "11px", color: "#6b7280" }}>繰り返す曜日：</span>
+                  <button
+                    onClick={() => setTaskRecurringDays([])}
+                    style={{ padding: "3px 10px", borderRadius: "6px", border: "none", background: taskRecurringDays.length === 0 ? "#6366f1" : "#f3f4f6", color: taskRecurringDays.length === 0 ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                  >毎日</button>
+                  {[1,2,3,4,5,6,0].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => setTaskRecurringDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])}
+                      style={{ padding: "3px 8px", borderRadius: "6px", border: "none", background: taskRecurringDays.includes(d) ? "#6366f1" : "#f3f4f6", color: taskRecurringDays.includes(d) ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer", minWidth: "28px" }}
+                    >{DAY_LABELS[d]}</button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 日付フィルター */}
