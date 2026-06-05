@@ -4,7 +4,13 @@ import { db } from "@/lib/db"
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     const body = await req.json()
-    const task = await db.update("tasks", params.id, { done: body.done })
+    const updates: Record<string, unknown> = {}
+    if (typeof body.done === "boolean") updates.done = body.done
+    if (typeof body.text === "string") updates.text = body.text
+    if (typeof body.memo === "string") updates.memo = body.memo
+    if (typeof body.mode === "string") updates.mode = body.mode
+
+    const task = await db.update("tasks", params.id, updates)
     return NextResponse.json(task)
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

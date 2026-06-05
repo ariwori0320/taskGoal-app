@@ -15,7 +15,15 @@ interface Task {
   due_date: string | null
   done: boolean
   parent_id: string | null
+  memo: string | null
+  mode: string
   created_at: string
+}
+
+const PRIORITY_CONFIG = {
+  high: { label: "高", bg: "#fee2e2", color: "#dc2626", border: "#fca5a5" },
+  mid:  { label: "中", bg: "#fef9c3", color: "#b45309", border: "#fde047" },
+  low:  { label: "低", bg: "#dcfce7", color: "#16a34a", border: "#86efac" },
 }
 
 interface Goal {
@@ -73,6 +81,12 @@ export default function Home() {
   const [taskText, setTaskText] = useState("")
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
   const [taskDue, setTaskDue] = useState("")
+
+  // Edit / memo
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState("")
+  const [expandedMemoId, setExpandedMemoId] = useState<string | null>(null)
+  const [memoInput, setMemoInput] = useState("")
 
   // Goal form
   const [goalText, setGoalText] = useState("")
@@ -144,6 +158,37 @@ export default function Home() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ done: !done }),
+    })
+  }
+
+  async function saveTaskEdit(id: string) {
+    if (!editingText.trim()) { setEditingId(null); return }
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, text: editingText } : t))
+    setEditingId(null)
+    await fetch(`/api/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: editingText }),
+    })
+  }
+
+  async function saveMemo(id: string) {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, memo: memoInput } : t))
+    setExpandedMemoId(null)
+    await fetch(`/api/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memo: memoInput }),
+    })
+  }
+
+  async function moveTask(id: string, currentMode: string) {
+    const newMode = currentMode === "work" ? "private" : "work"
+    setTasks(prev => prev.filter(t => t.id !== id))
+    await fetch(`/api/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: newMode }),
     })
   }
 
@@ -273,34 +318,95 @@ export default function Home() {
     const children = childrenOf(task.id)
     const grandChildren = (cid: string) => tasks.filter(t => t.parent_id === cid)
     const indent = level * 20
+    const pc = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.mid
+    const isEditing = editingId === task.id
+    const isMemoOpen = expandedMemoId === task.id
 
     return (
       <div>
-        <div className="task-item" style={{ paddingLeft: `${20 + indent}px` }}>
+        <div className="task-item" style={{ paddingLeft: `${20 + indent}px`, flexWrap: "wrap", gap: "6px" }}>
           <div className={`task-check ${task.done ? "task-check-done" : ""}`} onClick={() => toggleTask(task.id, task.done)}>
             {task.done ? "✓" : ""}
           </div>
-          <div className={`priority-dot p-${task.priority}`} />
-          <div className={`task-text ${task.done ? "task-text-done" : ""}`} style={{ flex: 1 }}>{task.text}</div>
+
+          {/* 優先度バッジ */}
+          <span style={{
+            background: pc.bg, color: pc.color, border: `1px solid ${pc.border}`,
+            borderRadius: "4px", padding: "1px 6px", fontSize: "11px", fontWeight: 700, flexShrink: 0,
+          }}>{pc.label}</span>
+
+          {/* タスクテキスト（クリックで編集） */}
+          {isEditing ? (
+            <input
+              autoFocus
+              value={editingText}
+              onChange={e => setEditingText(e.target.value)}
+              onBlur={() => saveTaskEdit(task.id)}
+              onKeyDown={e => { if (e.key === "Enter") saveTaskEdit(task.id); if (e.key === "Escape") setEditingId(null) }}
+              style={{ flex: 1, border: "1px solid #6366f1", borderRadius: "6px", padding: "2px 8px", fontSize: "14px", outline: "none" }}
+            />
+          ) : (
+            <div
+              className={`task-text ${task.done ? "task-text-done" : ""}`}
+              style={{ flex: 1, cursor: "text" }}
+              onDoubleClick={() => { setEditingId(task.id); setEditingText(task.text) }}
+              title="ダブルクリックで編集"
+            >{task.text}</div>
+          )}
+
           {task.due_date && (
             <div className={`task-due ${!task.done && isOverdue(task.due_date) ? "task-due-overdue" : ""}`}>
               {fmtDue(task.due_date)}
             </div>
           )}
+
+          {/* メモボタン */}
+          <button
+            onClick={() => { setExpandedMemoId(isMemoOpen ? null : task.id); setMemoInput(task.memo || "") }}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: "14px", padding: "2px 3px", opacity: task.memo ? 1 : 0.4 }}
+            title="メモ"
+          >📝</button>
+
+          {/* モード移動ボタン */}
+          <button
+            onClick={() => moveTask(task.id, task.mode || mode)}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: "12px", padding: "2px 3px", color: "#6b7280" }}
+            title={mode === "work" ? "プライベートへ移動" : "仕事へ移動"}
+          >{mode === "work" ? "🏠" : "💼"}</button>
+
           {level < 2 && (
             <button
               onClick={() => { setAddingChildTo(task.id); setChildText("") }}
-              style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "16px", padding: "2px 4px" }}
+              style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "15px", padding: "2px 3px" }}
               title="サブタスクを追加"
             >＋</button>
           )}
           <button
             onClick={() => openAiModal(task.text, task.id)}
-            style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 4px" }}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px" }}
             title="AIで分解"
           >🤖</button>
           <button className="del-btn" onClick={() => deleteTask(task.id)}>×</button>
         </div>
+
+        {/* メモ入力エリア */}
+        {isMemoOpen && (
+          <div style={{ padding: `6px 12px 10px ${20 + indent + 20}px`, background: "#fffbeb", borderBottom: "1px solid #f3f4f6" }}>
+            <textarea
+              autoFocus
+              value={memoInput}
+              onChange={e => setMemoInput(e.target.value)}
+              placeholder="メモを入力..."
+              rows={2}
+              style={{ width: "100%", border: "1px solid #fde047", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", outline: "none", resize: "vertical", lineHeight: 1.5 }}
+            />
+            <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+              <button onClick={() => saveMemo(task.id)} style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "6px", padding: "4px 14px", cursor: "pointer", fontSize: "13px" }}>保存</button>
+              <button onClick={() => setExpandedMemoId(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "13px" }}>キャンセル</button>
+            </div>
+          </div>
+        )}
+
 
         {/* インラインでサブタスク追加 */}
         {addingChildTo === task.id && (
