@@ -106,6 +106,41 @@ export default function Home() {
   // 日付フィルター
   const [dateFilter, setDateFilter] = useState<string>("")
 
+  // Task edit modal
+  const [editModal, setEditModal] = useState<Task | null>(null)
+  const [editForm, setEditForm] = useState({ text: "", priority: "mid" as Priority, due_date: "", is_recurring: false, recurring_days: [] as number[], memo: "" })
+
+  function openEditModal(task: Task) {
+    setEditModal(task)
+    setEditForm({
+      text: task.text,
+      priority: task.priority,
+      due_date: task.due_date ?? "",
+      is_recurring: task.is_recurring,
+      recurring_days: task.recurring_days ? task.recurring_days.split(",").filter(Boolean).map(Number) : [],
+      memo: task.memo ?? "",
+    })
+  }
+
+  async function saveEditModal() {
+    if (!editModal) return
+    const updates = {
+      text: editForm.text,
+      priority: editForm.priority,
+      due_date: editForm.due_date || null,
+      is_recurring: editForm.is_recurring,
+      recurring_days: editForm.is_recurring ? editForm.recurring_days.join(",") : "",
+      memo: editForm.memo,
+    }
+    setTasks(prev => prev.map(t => t.id === editModal.id ? { ...t, ...updates, recurring_done_date: t.recurring_done_date } : t))
+    setEditModal(null)
+    await fetch(`/api/tasks/${editModal.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    })
+  }
+
   // Edit / memo
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingText, setEditingText] = useState("")
@@ -398,9 +433,7 @@ export default function Home() {
           ) : (
             <div
               className={`task-text ${done ? "task-text-done" : ""}`}
-              style={{ flex: 1, cursor: "text" }}
-              onDoubleClick={() => { setEditingId(task.id); setEditingText(task.text) }}
-              title="ダブルクリックで編集"
+              style={{ flex: 1 }}
             >{task.text}</div>
           )}
 
@@ -409,6 +442,13 @@ export default function Home() {
               {fmtDue(task.due_date)}
             </div>
           )}
+
+          {/* 編集ボタン */}
+          <button
+            onClick={() => openEditModal(task)}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px", color: "#6b7280" }}
+            title="編集"
+          >✏️</button>
 
           {/* メモボタン */}
           <button
@@ -720,6 +760,78 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* ===== TASK EDIT MODAL ===== */}
+      {editModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div style={{ background: "white", borderRadius: "16px", width: "100%", maxWidth: "480px", overflow: "hidden" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontWeight: 700, fontSize: "16px" }}>✏️ タスクを編集</div>
+              <button onClick={() => setEditModal(null)} style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+            <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+              {/* タスク名 */}
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>タスク名</label>
+                <input value={editForm.text} onChange={e => setEditForm(p => ({ ...p, text: e.target.value }))}
+                  style={{ width: "100%", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }} />
+              </div>
+              {/* 優先度 */}
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>優先度</label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  {(["high","mid","low"] as Priority[]).map(p => {
+                    const pc = PRIORITY_CONFIG[p]
+                    return (
+                      <button key={p} onClick={() => setEditForm(prev => ({ ...prev, priority: p }))}
+                        style={{ flex: 1, padding: "8px", borderRadius: "8px", border: `2px solid ${editForm.priority === p ? pc.color : "#e5e7eb"}`, background: editForm.priority === p ? pc.bg : "white", color: pc.color, fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
+                        {pc.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              {/* 期日 */}
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>期日</label>
+                <input type="date" value={editForm.due_date} onChange={e => setEditForm(p => ({ ...p, due_date: e.target.value }))}
+                  style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }} />
+              </div>
+              {/* 繰り返し */}
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "6px" }}>繰り返し</label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", marginBottom: "8px" }}>
+                  <input type="checkbox" checked={editForm.is_recurring} onChange={e => setEditForm(p => ({ ...p, is_recurring: e.target.checked, recurring_days: [] }))} />
+                  🔁 繰り返す
+                </label>
+                {editForm.is_recurring && (
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    <button onClick={() => setEditForm(p => ({ ...p, recurring_days: [] }))}
+                      style={{ padding: "4px 12px", borderRadius: "6px", border: "none", background: editForm.recurring_days.length === 0 ? "#6366f1" : "#f3f4f6", color: editForm.recurring_days.length === 0 ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>毎日</button>
+                    {[1,2,3,4,5,6,0].map(d => (
+                      <button key={d} onClick={() => setEditForm(p => ({ ...p, recurring_days: p.recurring_days.includes(d) ? p.recurring_days.filter(x => x !== d) : [...p.recurring_days, d] }))}
+                        style={{ padding: "4px 10px", borderRadius: "6px", border: "none", background: editForm.recurring_days.includes(d) ? "#6366f1" : "#f3f4f6", color: editForm.recurring_days.includes(d) ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+                        {DAY_LABELS[d]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* メモ */}
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>メモ</label>
+                <textarea value={editForm.memo} onChange={e => setEditForm(p => ({ ...p, memo: e.target.value }))} rows={3}
+                  placeholder="メモを入力..."
+                  style={{ width: "100%", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "13px", outline: "none", resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #e5e7eb", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button onClick={() => setEditModal(null)} style={{ padding: "8px 20px", borderRadius: "8px", border: "1px solid #e5e7eb", background: "white", cursor: "pointer", fontSize: "14px" }}>キャンセル</button>
+              <button onClick={saveEditModal} style={{ padding: "8px 24px", borderRadius: "8px", border: "none", background: "#2563eb", color: "white", cursor: "pointer", fontSize: "14px", fontWeight: 600 }}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== AI CHAT MODAL ===== */}
       {aiModal && (
