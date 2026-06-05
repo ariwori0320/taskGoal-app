@@ -172,7 +172,7 @@ export default function Home() {
     })
   }
 
-  async function saveMemo(id: string) {
+  async function saveTaskMemo(id: string) {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, memo: memoInput } : t))
     setExpandedMemoId(null)
     await fetch(`/api/tasks/${id}`, {
@@ -401,7 +401,7 @@ export default function Home() {
               style={{ width: "100%", border: "1px solid #fde047", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", outline: "none", resize: "vertical", lineHeight: 1.5 }}
             />
             <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
-              <button onClick={() => saveMemo(task.id)} style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "6px", padding: "4px 14px", cursor: "pointer", fontSize: "13px" }}>保存</button>
+              <button onClick={() => saveTaskMemo(task.id)} style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "6px", padding: "4px 14px", cursor: "pointer", fontSize: "13px" }}>保存</button>
               <button onClick={() => setExpandedMemoId(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "13px" }}>キャンセル</button>
             </div>
           </div>
