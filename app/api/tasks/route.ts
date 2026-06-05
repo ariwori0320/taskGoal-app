@@ -19,12 +19,13 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { text, priority, due_date, mode, parent_id } = await req.json()
+    const { text, priority, due_date, mode, parent_id, is_recurring } = await req.json()
     if (!text?.trim()) return NextResponse.json({ error: "text required" }, { status: 400 })
     const task = await db.insert("tasks", {
       id: uid(), user_id: USER_ID, mode: mode || "work",
       text: text.trim(), priority: priority || "mid",
-      due_date: due_date || null, parent_id: parent_id || null, done: false,
+      due_date: due_date || null, parent_id: parent_id || null,
+      done: false, is_recurring: !!is_recurring,
     })
     return NextResponse.json(task, { status: 201 })
   } catch (e: any) {

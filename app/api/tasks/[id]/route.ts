@@ -9,6 +9,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (typeof body.text === "string") updates.text = body.text
     if (typeof body.memo === "string") updates.memo = body.memo
     if (typeof body.mode === "string") updates.mode = body.mode
+    if (typeof body.is_recurring === "boolean") updates.is_recurring = body.is_recurring
+    if ("recurring_done_date" in body) updates.recurring_done_date = body.recurring_done_date
 
     const task = await db.update("tasks", params.id, updates)
     return NextResponse.json(task)

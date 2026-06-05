@@ -17,7 +17,16 @@ interface Task {
   parent_id: string | null
   memo: string | null
   mode: string
+  is_recurring: boolean
+  recurring_done_date: string | null
   created_at: string
+}
+
+function today() { return new Date().toISOString().split("T")[0] }
+
+function isTaskDone(task: Task): boolean {
+  if (task.is_recurring) return task.recurring_done_date === today()
+  return task.done
 }
 
 const PRIORITY_CONFIG = {
@@ -81,6 +90,10 @@ export default function Home() {
   const [taskText, setTaskText] = useState("")
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
   const [taskDue, setTaskDue] = useState("")
+  const [taskRecurring, setTaskRecurring] = useState(false)
+
+  // 日付フィルター
+  const [dateFilter, setDateFilter] = useState<string>("")
 
   // Edit / memo
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -138,7 +151,7 @@ export default function Home() {
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId }),
+        body: JSON.stringify({ text: text.trim(), priority, due_date: due || null, mode, parent_id: parentId, is_recurring: parentId ? false : taskRecurring }),
       })
       const json = await res.json()
       if (!res.ok) {
@@ -152,13 +165,24 @@ export default function Home() {
     }
   }
 
-  async function toggleTask(id: string, done: boolean) {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !done } : t))
-    await fetch(`/api/tasks/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ done: !done }),
-    })
+  async function toggleTask(id: string, task: Task) {
+    if (task.is_recurring) {
+      const isDoneToday = task.recurring_done_date === today()
+      const newDate = isDoneToday ? null : today()
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, recurring_done_date: newDate } : t))
+      await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recurring_done_date: newDate }),
+      })
+    } else {
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !task.done } : t))
+      await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ done: !task.done }),
+      })
+    }
   }
 
   async function saveTaskEdit(id: string) {
@@ -303,14 +327,17 @@ export default function Home() {
   // ---- Derived ----
   const accentCls = mode === "work" ? "work" : "private"
   const parentTasks = tasks.filter(t => !t.parent_id)
-  const filteredParents = filter === "active" ? parentTasks.filter(t => !t.done)
-    : filter === "done" ? parentTasks.filter(t => t.done)
+  const dateFiltered = dateFilter
+    ? parentTasks.filter(t => t.due_date === dateFilter || t.is_recurring)
     : parentTasks
+  const filteredParents = filter === "active" ? dateFiltered.filter(t => !isTaskDone(t))
+    : filter === "done" ? dateFiltered.filter(t => isTaskDone(t))
+    : dateFiltered
   const childrenOf = (id: string) => tasks.filter(t => t.parent_id === id)
 
-  const activeCnt = tasks.filter(t => !t.done && !t.parent_id).length
-  const doneCnt = tasks.filter(t => t.done && !t.parent_id).length
-  const overdueCnt = tasks.filter(t => !t.done && isOverdue(t.due_date)).length
+  const activeCnt = tasks.filter(t => !isTaskDone(t) && !t.parent_id).length
+  const doneCnt = tasks.filter(t => isTaskDone(t) && !t.parent_id).length
+  const overdueCnt = tasks.filter(t => !isTaskDone(t) && isOverdue(t.due_date)).length
   const avgGoal = goals.length ? Math.round(goals.reduce((a, g) => a + g.pct, 0) / goals.length) : 0
 
   // ---- Task Item Component ----
@@ -321,13 +348,19 @@ export default function Home() {
     const pc = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.mid
     const isEditing = editingId === task.id
     const isMemoOpen = expandedMemoId === task.id
+    const done = isTaskDone(task)
 
     return (
       <div>
         <div className="task-item" style={{ paddingLeft: `${20 + indent}px`, flexWrap: "wrap", gap: "6px" }}>
-          <div className={`task-check ${task.done ? "task-check-done" : ""}`} onClick={() => toggleTask(task.id, task.done)}>
-            {task.done ? "✓" : ""}
+          <div className={`task-check ${done ? "task-check-done" : ""}`} onClick={() => toggleTask(task.id, task)}>
+            {done ? "✓" : ""}
           </div>
+
+          {/* 繰り返しバッジ */}
+          {task.is_recurring && (
+            <span style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", fontWeight: 700, flexShrink: 0 }}>🔁</span>
+          )}
 
           {/* 優先度バッジ */}
           <span style={{
@@ -347,7 +380,7 @@ export default function Home() {
             />
           ) : (
             <div
-              className={`task-text ${task.done ? "task-text-done" : ""}`}
+              className={`task-text ${done ? "task-text-done" : ""}`}
               style={{ flex: 1, cursor: "text" }}
               onDoubleClick={() => { setEditingId(task.id); setEditingText(task.text) }}
               title="ダブルクリックで編集"
@@ -529,7 +562,19 @@ export default function Home() {
                   <option value="low">🟢 低</option>
                 </select>
                 <input type="date" value={taskDue} onChange={e => setTaskDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }} />
+                <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
+                  <input type="checkbox" checked={taskRecurring} onChange={e => setTaskRecurring(e.target.checked)} />
+                  🔁 毎日
+                </label>
               </div>
+            </div>
+
+            {/* 日付フィルター */}
+            <div style={{ padding: "8px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "12px", color: "#6b7280", flexShrink: 0 }}>📅 日付:</span>
+              <button onClick={() => setDateFilter("")} style={{ padding: "3px 10px", borderRadius: "6px", border: "none", background: !dateFilter ? "#2563eb" : "#f3f4f6", color: !dateFilter ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>すべて</button>
+              <button onClick={() => setDateFilter(today())} style={{ padding: "3px 10px", borderRadius: "6px", border: "none", background: dateFilter === today() ? "#2563eb" : "#f3f4f6", color: dateFilter === today() ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>今日</button>
+              <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "6px", padding: "3px 8px", fontSize: "12px", outline: "none" }} />
             </div>
 
             {/* フィルター */}
