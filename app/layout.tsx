@@ -4,6 +4,10 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "MyFlow - タスク・目標管理",
   description: "プライベートと仕事のタスク・目標を一元管理",
+  icons: {
+    icon: "/icon.png",
+    apple: "/icon.png",
+  },
 }
 
 export const viewport: Viewport = {
