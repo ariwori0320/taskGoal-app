@@ -546,7 +546,7 @@ export default function Home() {
       </header>
 
       {/* Stats */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 24px 0" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "12px 12px 0" }}>
         <div className="stats">
           <div className="stat"><div className={`stat-num stat-num-${accentCls}`}>{activeCnt}</div><div className="stat-label">未完了</div></div>
           <div className="stat"><div className={`stat-num stat-num-${accentCls}`}>{doneCnt}</div><div className="stat-label">完了</div></div>
@@ -556,7 +556,7 @@ export default function Home() {
       </div>
 
       {/* Tab + Content */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 24px" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "12px 12px" }}>
         {/* Tabs */}
         <div style={{ display: "flex", gap: "4px", marginBottom: "16px", background: "#f3f4f6", borderRadius: "10px", padding: "4px", width: "fit-content" }}>
           {([["tasks", "✅ タスク"], ["goals", "🎯 目標"], ["memos", "📝 メモ"]] as [Tab, string][]).map(([t, label]) => (
@@ -578,12 +578,12 @@ export default function Home() {
             </div>
 
             {/* 入力エリア */}
-            <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
-              <div style={{ display: "flex", gap: "8px" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "6px" }}>
                 <input
                   ref={taskInputRef}
-                  style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }}
-                  placeholder="親タスクを追加..."
+                  style={{ flex: 1, minWidth: 0, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 10px", fontSize: "14px", outline: "none" }}
+                  placeholder="タスクを追加..."
                   defaultValue=""
                   onKeyDown={e => {
                     if (e.key === "Enter") {
@@ -600,10 +600,11 @@ export default function Home() {
                     if (!val.trim()) return
                     openAiModal(val)
                   }}
-                  style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "8px", padding: "8px 14px", cursor: "pointer", fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap" }}
-                >🤖 AI分解</button>
+                  style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "8px", padding: "8px 10px", cursor: "pointer", fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}
+                >🤖</button>
                 <button
                   className={`add-btn add-btn-${accentCls}`}
+                  style={{ flexShrink: 0 }}
                   onClick={() => {
                     const val = taskInputRef.current?.value || ""
                     if (!val.trim()) return
@@ -612,13 +613,13 @@ export default function Home() {
                   }}
                 >+</button>
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <select value={taskPriority} onChange={e => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }}>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                <select value={taskPriority} onChange={e => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 6px", fontSize: "12px", outline: "none" }}>
                   <option value="high">🔴 高</option>
                   <option value="mid">🟠 中</option>
                   <option value="low">🟢 低</option>
                 </select>
-                <input type="date" value={taskDue} onChange={e => setTaskDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 8px", fontSize: "12px", outline: "none" }} />
+                <input type="date" value={taskDue} onChange={e => setTaskDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 6px", fontSize: "12px", outline: "none", maxWidth: "140px" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", color: "#374151", cursor: "pointer", whiteSpace: "nowrap" }}>
                   <input type="checkbox" checked={taskRecurring} onChange={e => { setTaskRecurring(e.target.checked); if (!e.target.checked) setTaskRecurringDays([]) }} />
                   🔁 繰り返し
