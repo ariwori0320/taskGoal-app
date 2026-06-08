@@ -111,6 +111,7 @@ body {
   .task-item { padding: 10px 12px; }
   .goal-item { padding: 12px 14px; }
   .filter-tabs { padding: 8px 14px 0; }
+  .memo-grid { grid-template-columns: 1fr; gap: 12px; }
 }
 
 /* Stats */
@@ -149,6 +150,9 @@ body {
 }
 
 .card-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+/* Memo tab grid */
+.memo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .badge-work    { background: var(--work-light);    color: var(--work-primary); }

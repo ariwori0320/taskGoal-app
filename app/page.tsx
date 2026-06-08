@@ -20,19 +20,13 @@ interface Task {
   is_recurring: boolean
   recurring_days: string  // "" = 毎日, "1,3,5" = 月水金 (0=日,1=月,...,6=土)
   recurring_done_date: string | null
+  sort_order: number | null
   created_at: string
 }
 
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"]
 
 function today() { return new Date().toISOString().split("T")[0] }
-
-function isRecurringToday(task: Task): boolean {
-  if (!task.is_recurring) return false
-  if (!task.recurring_days) return true // 毎日
-  const days = task.recurring_days.split(",").map(Number)
-  return days.includes(new Date().getDay())
-}
 
 function isTaskDone(task: Task): boolean {
   if (task.is_recurring) return task.recurring_done_date === today()
@@ -94,7 +88,7 @@ export default function Home() {
   const [goals, setGoals] = useState<Goal[]>([])
   const [memos, setMemos] = useState<Memo[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<Filter>("all")
+  const [filter, setFilter] = useState<Filter>("active")
 
   // Task form
   const [taskText, setTaskText] = useState("")
@@ -102,9 +96,6 @@ export default function Home() {
   const [taskDue, setTaskDue] = useState("")
   const [taskRecurring, setTaskRecurring] = useState(false)
   const [taskRecurringDays, setTaskRecurringDays] = useState<number[]>([]) // [] = 毎日
-
-  // 日付フィルター
-  const [dateFilter, setDateFilter] = useState<string>("")
 
   // Task edit modal
   const [editModal, setEditModal] = useState<Task | null>(null)
@@ -151,10 +142,32 @@ export default function Home() {
   const [goalText, setGoalText] = useState("")
   const [goalDue, setGoalDue] = useState("")
 
+  // Goal edit modal
+  const [editGoalModal, setEditGoalModal] = useState<Goal | null>(null)
+  const [goalEditForm, setGoalEditForm] = useState({ text: "", due_date: "", pct: 0 })
+
   // Memo
   const [editMemo, setEditMemo] = useState<Memo | null>(null)
   const [memoTitle, setMemoTitle] = useState("")
   const [memoContent, setMemoContent] = useState("")
+  const memoEditorRef = useRef<HTMLDivElement>(null)
+
+  // スマホでは編集欄が一覧の下にあるため、選択/新規時にスクロールして見せる
+  function focusMemoEditor() {
+    if (typeof window !== "undefined" && window.innerWidth <= 720) {
+      setTimeout(() => memoEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50)
+    }
+  }
+
+  function selectMemo(m: Memo) {
+    setEditMemo(m); setMemoTitle(m.title); setMemoContent(m.content)
+    focusMemoEditor()
+  }
+
+  function newMemo() {
+    setEditMemo(null); setMemoTitle(""); setMemoContent("")
+    focusMemoEditor()
+  }
 
   // AI Chat modal
   const [aiModal, setAiModal] = useState(false)
@@ -169,6 +182,10 @@ export default function Home() {
   // Inline child task input
   const [addingChildTo, setAddingChildTo] = useState<string | null>(null)
   const [childText, setChildText] = useState("")
+
+  // Drag & drop reorder (親タスクのみ)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   // Pct debounce
   const pctTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -209,6 +226,19 @@ export default function Home() {
     } catch (e) {
       alert(`通信エラー: ${e}`)
     }
+  }
+
+  // メイン入力欄からの追加（フォームの優先度・期日・繰り返しを反映）
+  async function handleAddMainTask() {
+    const val = taskInputRef.current?.value || ""
+    if (!val.trim()) return
+    await addTask(val, null, taskPriority, taskDue)
+    if (taskInputRef.current) taskInputRef.current.value = ""
+    setTaskText("")
+    setTaskPriority("mid")
+    setTaskDue("")
+    setTaskRecurring(false)
+    setTaskRecurringDays([])
   }
 
   async function toggleTask(id: string, task: Task) {
@@ -267,6 +297,30 @@ export default function Home() {
     await fetch(`/api/tasks/${id}`, { method: "DELETE" })
   }
 
+  // ドラッグで親タスクを並び替え、sort_order を更新
+  async function reorderTasks(targetId: string) {
+    const src = dragId
+    setDragId(null)
+    setDragOverId(null)
+    if (!src || src === targetId) return
+    const ids = filteredParents.map(t => t.id)
+    const from = ids.indexOf(src)
+    const to = ids.indexOf(targetId)
+    if (from === -1 || to === -1) return
+    const newIds = [...ids]
+    newIds.splice(from, 1)
+    newIds.splice(to, 0, src)
+    const orderMap = new Map(newIds.map((id, i) => [id, i]))
+    setTasks(prev => prev.map(t => orderMap.has(t.id) ? { ...t, sort_order: orderMap.get(t.id)! } : t))
+    await Promise.all(newIds.map((id, i) =>
+      fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sort_order: i }),
+      })
+    ))
+  }
+
   // ---- Goal actions ----
   async function addGoal() {
     if (!goalText.trim()) return
@@ -290,6 +344,24 @@ export default function Home() {
         body: JSON.stringify({ pct }),
       })
     }, 400)
+  }
+
+  function openGoalEdit(g: Goal) {
+    setEditGoalModal(g)
+    setGoalEditForm({ text: g.text, due_date: g.due_date ?? "", pct: g.pct })
+  }
+
+  async function saveGoalEdit() {
+    if (!editGoalModal) return
+    if (!goalEditForm.text.trim()) return
+    const updates = { text: goalEditForm.text.trim(), due_date: goalEditForm.due_date || null, pct: goalEditForm.pct }
+    setGoals(prev => prev.map(g => g.id === editGoalModal.id ? { ...g, ...updates } : g))
+    setEditGoalModal(null)
+    await fetch(`/api/goals/${editGoalModal.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    })
   }
 
   async function deleteGoal(id: string) {
@@ -372,17 +444,17 @@ export default function Home() {
 
   // ---- Derived ----
   const accentCls = mode === "work" ? "work" : "private"
-  const parentTasks = tasks.filter(t => {
-    if (t.parent_id) return false
-    if (t.is_recurring) return isRecurringToday(t) // 今日が対象曜日の時だけ表示
-    return true
-  })
-  const dateFiltered = dateFilter
-    ? parentTasks.filter(t => t.due_date === dateFilter || t.is_recurring)
-    : parentTasks
-  const filteredParents = filter === "active" ? dateFiltered.filter(t => !isTaskDone(t))
-    : filter === "done" ? dateFiltered.filter(t => isTaskDone(t))
-    : dateFiltered
+  // 親タスク（繰り返しは曜日に関わらず常に表示）を sort_order 順に並べる
+  const parentTasks = tasks
+    .filter(t => !t.parent_id)
+    .sort((a, b) => {
+      const av = a.sort_order ?? Number.POSITIVE_INFINITY
+      const bv = b.sort_order ?? Number.POSITIVE_INFINITY
+      return av - bv // 同値（未設定同士）は元の created_at.desc 順を維持
+    })
+  const filteredParents = filter === "done"
+    ? parentTasks.filter(t => isTaskDone(t))
+    : parentTasks.filter(t => !isTaskDone(t))
   const childrenOf = (id: string) => tasks.filter(t => t.parent_id === id)
 
   const activeCnt = tasks.filter(t => !isTaskDone(t) && !t.parent_id).length
@@ -400,9 +472,26 @@ export default function Home() {
     const isMemoOpen = expandedMemoId === task.id
     const done = isTaskDone(task)
 
+    const isDragTarget = level === 0 && dragOverId === task.id && dragId !== task.id
+
     return (
       <div>
-        <div className="task-item" style={{ paddingLeft: `${20 + indent}px`, flexWrap: "wrap", gap: "6px" }}>
+        <div
+          className="task-item"
+          style={{
+            paddingLeft: `${20 + indent}px`, flexWrap: "wrap", gap: "6px",
+            opacity: dragId === task.id ? 0.4 : 1,
+            borderTop: isDragTarget ? "2px solid #6366f1" : undefined,
+          }}
+          draggable={level === 0 && editingId !== task.id}
+          onDragStart={level === 0 ? () => setDragId(task.id) : undefined}
+          onDragOver={level === 0 ? (e) => { e.preventDefault(); if (dragOverId !== task.id) setDragOverId(task.id) } : undefined}
+          onDragEnd={level === 0 ? () => { setDragId(null); setDragOverId(null) } : undefined}
+          onDrop={level === 0 ? (e) => { e.preventDefault(); reorderTasks(task.id) } : undefined}
+        >
+          {level === 0 && (
+            <span title="ドラッグで並び替え" style={{ cursor: "grab", color: "#cbd5e1", fontSize: "14px", flexShrink: 0, userSelect: "none", lineHeight: 1 }}>⠿</span>
+          )}
           <div className={`task-check ${done ? "task-check-done" : ""}`} onClick={() => toggleTask(task.id, task)}>
             {done ? "✓" : ""}
           </div>
@@ -586,12 +675,7 @@ export default function Home() {
                   placeholder="タスクを追加..."
                   defaultValue=""
                   onKeyDown={e => {
-                    if (e.key === "Enter") {
-                      const val = taskInputRef.current?.value || ""
-                      setTaskText(val)
-                      addTask(val)
-                      if (taskInputRef.current) taskInputRef.current.value = ""
-                    }
+                    if (e.key === "Enter") handleAddMainTask()
                   }}
                 />
                 <button
@@ -605,12 +689,7 @@ export default function Home() {
                 <button
                   className={`add-btn add-btn-${accentCls}`}
                   style={{ flexShrink: 0 }}
-                  onClick={() => {
-                    const val = taskInputRef.current?.value || ""
-                    if (!val.trim()) return
-                    addTask(val)
-                    if (taskInputRef.current) taskInputRef.current.value = ""
-                  }}
+                  onClick={handleAddMainTask}
                 >+</button>
               </div>
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
@@ -645,19 +724,11 @@ export default function Home() {
               )}
             </div>
 
-            {/* 日付フィルター */}
-            <div style={{ padding: "8px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "12px", color: "#6b7280", flexShrink: 0 }}>📅 日付:</span>
-              <button onClick={() => setDateFilter("")} style={{ padding: "3px 10px", borderRadius: "6px", border: "none", background: !dateFilter ? "#2563eb" : "#f3f4f6", color: !dateFilter ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>すべて</button>
-              <button onClick={() => setDateFilter(today())} style={{ padding: "3px 10px", borderRadius: "6px", border: "none", background: dateFilter === today() ? "#2563eb" : "#f3f4f6", color: dateFilter === today() ? "white" : "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>今日</button>
-              <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "6px", padding: "3px 8px", fontSize: "12px", outline: "none" }} />
-            </div>
-
             {/* フィルター */}
             <div className="filter-tabs">
-              {(["all", "active", "done"] as Filter[]).map(f => (
+              {(["active", "done"] as Filter[]).map(f => (
                 <button key={f} className={`filter-tab ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
-                  {f === "all" ? "すべて" : f === "active" ? "未完了" : "完了"}
+                  {f === "active" ? "未完了" : "完了"}
                 </button>
               ))}
             </div>
@@ -693,6 +764,7 @@ export default function Home() {
                     <div className="goal-top">
                       <div className={`goal-name ${g.pct >= 100 ? "goal-name-done" : ""}`}>{g.text}</div>
                       <div className={`goal-pct goal-pct-${accentCls}`}>{g.pct}%</div>
+                      <button onClick={() => openGoalEdit(g)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px", color: "#6b7280" }} title="編集">✏️</button>
                       <button className="del-btn" onClick={() => deleteGoal(g.id)}>×</button>
                     </div>
                     <div className="progress-bar"><div className={`progress-fill progress-${accentCls}`} style={{ width: `${g.pct}%` }} /></div>
@@ -708,13 +780,13 @@ export default function Home() {
 
         {/* ===== MEMOS TAB ===== */}
         {tab === "memos" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          <div className="memo-grid">
             {/* メモ一覧 */}
             <div className="card">
               <div className="card-header">
                 <div className="card-title"><span>📝</span> メモ一覧</div>
                 <button
-                  onClick={() => { setEditMemo(null); setMemoTitle(""); setMemoContent("") }}
+                  onClick={newMemo}
                   className={`add-btn add-btn-${accentCls}`}
                   style={{ fontSize: "14px", padding: "6px 12px" }}
                 >+ 新規</button>
@@ -722,7 +794,7 @@ export default function Home() {
               <div className="list-body">
                 {memos.length === 0 ? <div className="empty-msg">メモがありません</div>
                   : memos.map(m => (
-                    <div key={m.id} onClick={() => { setEditMemo(m); setMemoTitle(m.title); setMemoContent(m.content) }}
+                    <div key={m.id} onClick={() => selectMemo(m)}
                       style={{ padding: "12px 20px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", transition: "background .1s" }}
                       onMouseEnter={e => (e.currentTarget.style.background = "#f9fafb")}
                       onMouseLeave={e => (e.currentTarget.style.background = "white")}
@@ -738,7 +810,7 @@ export default function Home() {
             </div>
 
             {/* メモ編集 */}
-            <div className="card">
+            <div className="card" ref={memoEditorRef}>
               <div className="card-header">
                 <div className="card-title"><span>✏️</span> {editMemo ? "編集" : "新規メモ"}</div>
                 <button onClick={saveMemo} style={{ background: mode === "work" ? "#2563eb" : "#7c3aed", color: "white", border: "none", borderRadius: "8px", padding: "6px 16px", cursor: "pointer", fontWeight: 600, fontSize: "13px" }}>保存</button>
@@ -829,6 +901,38 @@ export default function Home() {
             <div style={{ padding: "12px 20px", borderTop: "1px solid #e5e7eb", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
               <button onClick={() => setEditModal(null)} style={{ padding: "8px 20px", borderRadius: "8px", border: "1px solid #e5e7eb", background: "white", cursor: "pointer", fontSize: "14px" }}>キャンセル</button>
               <button onClick={saveEditModal} style={{ padding: "8px 24px", borderRadius: "8px", border: "none", background: "#2563eb", color: "white", cursor: "pointer", fontSize: "14px", fontWeight: 600 }}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== GOAL EDIT MODAL ===== */}
+      {editGoalModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <div style={{ background: "white", borderRadius: "16px", width: "100%", maxWidth: "440px", overflow: "hidden" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontWeight: 700, fontSize: "16px" }}>🎯 目標を編集</div>
+              <button onClick={() => setEditGoalModal(null)} style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+            <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>目標名</label>
+                <input value={goalEditForm.text} onChange={e => setGoalEditForm(p => ({ ...p, text: e.target.value }))}
+                  style={{ width: "100%", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>期日</label>
+                <input type="date" value={goalEditForm.due_date} onChange={e => setGoalEditForm(p => ({ ...p, due_date: e.target.value }))}
+                  style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", display: "block", marginBottom: "4px" }}>進捗：{goalEditForm.pct}%</label>
+                <input type="range" min={0} max={100} value={goalEditForm.pct} onChange={e => setGoalEditForm(p => ({ ...p, pct: Number(e.target.value) }))} style={{ width: "100%", cursor: "pointer" }} />
+              </div>
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #e5e7eb", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button onClick={() => setEditGoalModal(null)} style={{ padding: "8px 20px", borderRadius: "8px", border: "1px solid #e5e7eb", background: "white", cursor: "pointer", fontSize: "14px" }}>キャンセル</button>
+              <button onClick={saveGoalEdit} style={{ padding: "8px 24px", borderRadius: "8px", border: "none", background: mode === "work" ? "#2563eb" : "#7c3aed", color: "white", cursor: "pointer", fontSize: "14px", fontWeight: 600 }}>保存</button>
             </div>
           </div>
         </div>
