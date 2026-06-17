@@ -85,6 +85,27 @@ function isOverdue(d: string | null) {
   return date < now
 }
 
+// 繰り返しタスクの次回該当日（完了済みなら翌日以降から探す）
+function nextRecurrenceDate(task: Task): string {
+  const days = task.recurring_days ? task.recurring_days.split(",").filter(Boolean).map(Number) : [0, 1, 2, 3, 4, 5, 6]
+  if (days.length === 0) return today()
+  const doneToday = task.recurring_done_date === today()
+  const base = new Date(); base.setHours(0, 0, 0, 0)
+  for (let i = doneToday ? 1 : 0; i < 21; i++) {
+    const d = new Date(base); d.setDate(base.getDate() + i)
+    if (days.includes(d.getDay())) return d.toISOString().split("T")[0]
+  }
+  return today()
+}
+
+function fmtNextRecurrence(task: Task): string {
+  const d = nextRecurrenceDate(task)
+  if (d === today()) return "今日"
+  const dt = new Date(d + "T00:00:00")
+  if (dt.getTime() - new Date(today() + "T00:00:00").getTime() === 86400000) return "明日"
+  return `${dt.getMonth() + 1}/${dt.getDate()}(${DAY_LABELS[dt.getDay()]})`
+}
+
 // テキスト中の URL をクリック可能なリンクに変換
 function renderWithLinks(text: string) {
   if (!text) return null
@@ -116,10 +137,10 @@ function InlineTextEdit({ initial, onSave, onCancel }: { initial: string; onSave
   )
 }
 
-function TaskMemoEditor({ initial, indent, onSave, onCancel }: { initial: string; indent: number; onSave: (v: string) => void; onCancel: () => void }) {
+function TaskMemoEditor({ initial, onSave, onCancel }: { initial: string; onSave: (v: string) => void; onCancel: () => void }) {
   const [v, setV] = useState(initial)
   return (
-    <div style={{ padding: `6px 12px 10px ${20 + indent + 20}px`, background: "#fffbeb", borderBottom: "1px solid #f3f4f6" }}>
+    <div style={{ padding: "6px 12px 10px 44px", background: "#fffbeb", borderBottom: "1px solid #f3f4f6" }}>
       <textarea
         autoFocus
         value={v}
@@ -136,10 +157,10 @@ function TaskMemoEditor({ initial, indent, onSave, onCancel }: { initial: string
   )
 }
 
-function ChildTaskInput({ indent, onAdd, onCancel }: { indent: number; onAdd: (v: string) => void; onCancel: () => void }) {
+function ChildTaskInput({ onAdd, onCancel }: { onAdd: (v: string) => void; onCancel: () => void }) {
   const [v, setV] = useState("")
   return (
-    <div style={{ display: "flex", gap: "6px", padding: `6px 12px 6px ${20 + indent + 20}px`, background: "#f9fafb" }}>
+    <div style={{ display: "flex", gap: "6px", padding: "6px 12px 6px 44px", background: "#f9fafb" }}>
       <input
         autoFocus
         value={v}
@@ -171,6 +192,8 @@ interface TaskCtx {
   setExpandedMemoId: (id: string | null) => void
   addingChildTo: string | null
   setAddingChildTo: (id: string | null) => void
+  collapsedIds: Set<string>
+  toggleCollapse: (id: string) => void
   draggingId: string | null
   dragOverId: string | null
   toggleTask: (id: string, task: Task) => void
@@ -187,7 +210,9 @@ interface TaskCtx {
 
 function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCtx }) {
   const children = ctx.tasks.filter(t => t.parent_id === task.id)
-  const indent = level * 20
+  const hasChildren = children.length > 0
+  const collapsed = ctx.collapsedIds.has(task.id)
+  const isChild = level > 0
   const pc = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG.mid
   const isEditing = ctx.editingId === task.id
   const isMemoOpen = ctx.expandedMemoId === task.id
@@ -201,9 +226,12 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
         className="task-item"
         {...(level === 0 ? { "data-task-id": task.id } : {})}
         style={{
-          paddingLeft: `${20 + indent}px`, flexWrap: "wrap", gap: "6px",
+          paddingLeft: isChild ? "10px" : "20px",
+          paddingTop: isChild ? "7px" : undefined,
+          paddingBottom: isChild ? "7px" : undefined,
+          flexWrap: "wrap", gap: "6px",
           opacity: isDragging ? 0.4 : 1,
-          background: isDragging ? "#eef2ff" : undefined,
+          background: isDragging ? "#eef2ff" : (isChild ? "#fcfcfd" : undefined),
           borderTop: isDragTarget ? "2px solid #6366f1" : undefined,
         }}
         onPointerDown={level === 0 ? (e) => ctx.onRowPointerDown(e, task.id) : undefined}
@@ -211,7 +239,20 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
         {level === 0 && (
           <span title="長押しで並び替え" style={{ cursor: "grab", color: "#cbd5e1", fontSize: "14px", flexShrink: 0, userSelect: "none", lineHeight: 1, touchAction: "none" }}>⠿</span>
         )}
-        <div className={`task-check ${done ? "task-check-done" : ""}`} onClick={() => ctx.toggleTask(task.id, task)}>
+
+        {/* 折りたたみ / ツリー記号 */}
+        {hasChildren ? (
+          <button onClick={() => ctx.toggleCollapse(task.id)} title={collapsed ? "展開" : "折りたたみ"}
+            style={{ border: "none", background: "none", cursor: "pointer", color: "#9ca3af", fontSize: "10px", width: "16px", flexShrink: 0, padding: 0, lineHeight: 1 }}>
+            {collapsed ? "▶" : "▼"}
+          </button>
+        ) : isChild ? (
+          <span style={{ color: "#d1d5db", fontSize: "12px", flexShrink: 0, width: "12px", textAlign: "center" }}>↳</span>
+        ) : null}
+
+        <div className={`task-check ${done ? "task-check-done" : ""}`}
+          style={isChild ? { width: "16px", height: "16px", fontSize: "10px" } : undefined}
+          onClick={() => ctx.toggleTask(task.id, task)}>
           {done ? "✓" : ""}
         </div>
 
@@ -223,7 +264,7 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
 
         <span style={{
           background: pc.bg, color: pc.color, border: `1px solid ${pc.border}`,
-          borderRadius: "4px", padding: "1px 6px", fontSize: "11px", fontWeight: 700, flexShrink: 0,
+          borderRadius: "4px", padding: "1px 6px", fontSize: isChild ? "10px" : "11px", fontWeight: 700, flexShrink: 0,
         }}>{pc.label}</span>
 
         {isEditing ? (
@@ -235,19 +276,28 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
         ) : (
           <div
             className={`task-text ${done ? "task-text-done" : ""}`}
-            style={{ flex: 1 }}
+            style={{ flex: 1, fontSize: isChild ? "13px" : "14px", color: isChild && !done ? "#4b5563" : undefined }}
             onClick={() => ctx.requestEdit(task.id)}
           >{task.text}</div>
         )}
 
-        {/* 開始日〜期限 */}
-        {task.start_date && (
-          <div className="task-due" style={{ color: "#6b7280" }}>{fmtShort(task.start_date)}〜</div>
+        {/* 日付：繰り返しは「次回」、通常は開始〜期限 */}
+        {task.is_recurring ? (
+          <div className="task-due" style={{ color: "#0369a1", fontWeight: 600 }}>次回 {fmtNextRecurrence(task)}</div>
+        ) : (
+          <>
+            {task.start_date && <div className="task-due" style={{ color: "#6b7280" }}>{fmtShort(task.start_date)}〜</div>}
+            {task.due_date && (
+              <div className={`task-due ${!done && isOverdue(task.due_date) ? "task-due-overdue" : ""}`}>
+                {task.start_date ? fmtShort(task.due_date) : fmtDue(task.due_date)}
+              </div>
+            )}
+          </>
         )}
-        {task.due_date && (
-          <div className={`task-due ${!task.done && isOverdue(task.due_date) ? "task-due-overdue" : ""}`}>
-            {task.start_date ? fmtShort(task.due_date) : fmtDue(task.due_date)}
-          </div>
+
+        {/* サブタスク数バッジ */}
+        {hasChildren && (
+          <span style={{ fontSize: "10px", color: "#6b7280", background: "#f3f4f6", borderRadius: "4px", padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>サブ{children.length}</span>
         )}
 
         <button onClick={() => ctx.openEditModal(task)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px", color: "#6b7280" }} title="編集">✏️</button>
@@ -262,7 +312,7 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
 
       {/* メモ表示（読み取り：リンク有効） */}
       {!isMemoOpen && task.memo && (
-        <div style={{ padding: `2px 12px 8px ${20 + indent + 40}px`, fontSize: "12px", color: "#92400e", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+        <div style={{ padding: "2px 12px 8px 44px", fontSize: "12px", color: "#92400e", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
           📝 {renderWithLinks(task.memo)}
         </div>
       )}
@@ -271,7 +321,6 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
       {isMemoOpen && (
         <TaskMemoEditor
           initial={task.memo || ""}
-          indent={indent}
           onSave={(v) => ctx.saveTaskMemo(task.id, v)}
           onCancel={() => ctx.setExpandedMemoId(null)}
         />
@@ -280,16 +329,19 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
       {/* サブタスク追加 */}
       {ctx.addingChildTo === task.id && (
         <ChildTaskInput
-          indent={indent}
           onAdd={(v) => { ctx.addChild(task.id, v); ctx.setAddingChildTo(null) }}
           onCancel={() => ctx.setAddingChildTo(null)}
         />
       )}
 
-      {/* 子タスク（再帰） */}
-      {children.map(child => (
-        <TaskItem key={child.id} task={child} level={level + 1} ctx={ctx} />
-      ))}
+      {/* 子タスク（インデント＋ガイド線で関連を明示・折りたたみ対応） */}
+      {hasChildren && !collapsed && (
+        <div style={{ marginLeft: "22px", borderLeft: "2px solid #e0e7ff", paddingLeft: "2px" }}>
+          {children.map(child => (
+            <TaskItem key={child.id} task={child} level={level + 1} ctx={ctx} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -365,6 +417,15 @@ export default function Home() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [expandedMemoId, setExpandedMemoId] = useState<string | null>(null)
   const [addingChildTo, setAddingChildTo] = useState<string | null>(null)
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
+
+  function toggleCollapse(id: string) {
+    setCollapsedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   // Goal form
   const [goalText, setGoalText] = useState("")
@@ -649,7 +710,7 @@ export default function Home() {
 
   const activeCnt = tasks.filter(t => !isTaskDone(t) && !t.parent_id).length
   const doneCnt = tasks.filter(t => isTaskDone(t) && !t.parent_id).length
-  const overdueCnt = tasks.filter(t => !isTaskDone(t) && isOverdue(t.due_date)).length
+  const overdueCnt = tasks.filter(t => !isTaskDone(t) && !t.is_recurring && isOverdue(t.due_date)).length
   const avgGoal = goals.length ? Math.round(goals.reduce((a, g) => a + g.pct, 0) / goals.length) : 0
 
   // ---- Drag & drop (長押し→ドラッグ, タッチ対応) ----
@@ -740,7 +801,7 @@ export default function Home() {
 
   const ctx: TaskCtx = {
     tasks, mode, editingId, setEditingId, expandedMemoId, setExpandedMemoId,
-    addingChildTo, setAddingChildTo, draggingId, dragOverId,
+    addingChildTo, setAddingChildTo, collapsedIds, toggleCollapse, draggingId, dragOverId,
     toggleTask, requestEdit, saveTaskText, saveTaskMemo, openEditModal, moveTask, deleteTask, openAiModal, addChild, onRowPointerDown,
   }
 
@@ -754,11 +815,6 @@ export default function Home() {
           <button className={`mode-btn ${mode === "private" ? "active-priv" : ""}`} onClick={() => setMode("private")}>🏠 プライベート</button>
         </div>
       </header>
-
-      {/* 今月の目標（常時表示・ステータスの上） */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "12px 12px 0" }}>
-        <HighlightBanner icon="📌" label="今月の目標" value={highlights.month} accentColor={accentColor} onSave={(v) => saveHighlight("month", v)} />
-      </div>
 
       {/* Stats */}
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "12px 12px 0" }}>
