@@ -409,7 +409,7 @@ export default function Home() {
   const [highlights, setHighlights] = useState<{ year: string; month: string }>({ year: "", month: "" })
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>("active")
-  const [sortMode, setSortMode] = useState<"manual" | "auto">("manual")
+  const [sortMode, setSortMode] = useState<"manual" | "auto">("auto")
 
   // Task form
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
@@ -488,6 +488,15 @@ export default function Home() {
   }, [mode])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // 並び順の選択を記憶（リロード後も保持。モード共通）
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("taskSortMode") : null
+    if (saved === "manual" || saved === "auto") setSortMode(saved)
+  }, [])
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("taskSortMode", sortMode)
+  }, [sortMode])
 
   // ---- Task actions ----
   async function addTask(text: string, parentId: string | null = null, priority: Priority = "mid", start = "", due = "") {
