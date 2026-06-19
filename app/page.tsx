@@ -106,6 +106,17 @@ function fmtNextRecurrence(task: Task): string {
   return `${dt.getMonth() + 1}/${dt.getDate()}(${DAY_LABELS[dt.getDay()]})`
 }
 
+// 自動並び替え：期限ありを上（期限が早い順）→ 残りは優先度の高い順
+const PRANK: Record<Priority, number> = { high: 0, mid: 1, low: 2 }
+function effDue(t: Task): string | null { return t.is_recurring ? null : t.due_date }
+function autoCompare(a: Task, b: Task): number {
+  const ad = effDue(a), bd = effDue(b)
+  if (ad && !bd) return -1
+  if (!ad && bd) return 1
+  if (ad && bd && ad !== bd) return ad < bd ? -1 : 1
+  return (PRANK[a.priority] ?? 1) - (PRANK[b.priority] ?? 1)
+}
+
 // テキスト中の URL をクリック可能なリンクに変換
 function renderWithLinks(text: string) {
   if (!text) return null
@@ -194,6 +205,7 @@ interface TaskCtx {
   setAddingChildTo: (id: string | null) => void
   collapsedIds: Set<string>
   toggleCollapse: (id: string) => void
+  dragEnabled: boolean
   draggingId: string | null
   dragOverId: string | null
   toggleTask: (id: string, task: Task) => void
@@ -234,9 +246,9 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
           background: isDragging ? "#eef2ff" : (isChild ? "#fcfcfd" : undefined),
           borderTop: isDragTarget ? "2px solid #6366f1" : undefined,
         }}
-        onPointerDown={level === 0 ? (e) => ctx.onRowPointerDown(e, task.id) : undefined}
+        onPointerDown={level === 0 && ctx.dragEnabled ? (e) => ctx.onRowPointerDown(e, task.id) : undefined}
       >
-        {level === 0 && (
+        {level === 0 && ctx.dragEnabled && (
           <span title="長押しで並び替え" style={{ cursor: "grab", color: "#cbd5e1", fontSize: "14px", flexShrink: 0, userSelect: "none", lineHeight: 1, touchAction: "none" }}>⠿</span>
         )}
 
@@ -397,6 +409,7 @@ export default function Home() {
   const [highlights, setHighlights] = useState<{ year: string; month: string }>({ year: "", month: "" })
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>("active")
+  const [sortMode, setSortMode] = useState<"manual" | "auto">("manual")
 
   // Task form
   const [taskPriority, setTaskPriority] = useState<Priority>("mid")
@@ -700,9 +713,10 @@ export default function Home() {
     return true
   }
 
-  const parentTasks = tasks
-    .filter(t => !t.parent_id)
-    .sort((a, b) => (a.sort_order ?? Number.POSITIVE_INFINITY) - (b.sort_order ?? Number.POSITIVE_INFINITY))
+  const parentBase = tasks.filter(t => !t.parent_id)
+  const parentTasks = sortMode === "auto"
+    ? [...parentBase].sort(autoCompare)
+    : [...parentBase].sort((a, b) => (a.sort_order ?? Number.POSITIVE_INFINITY) - (b.sort_order ?? Number.POSITIVE_INFINITY))
   const rangedParents = parentTasks.filter(inRange)
   const filteredParents = filter === "done"
     ? rangedParents.filter(t => isTaskDone(t))
@@ -801,7 +815,7 @@ export default function Home() {
 
   const ctx: TaskCtx = {
     tasks, mode, editingId, setEditingId, expandedMemoId, setExpandedMemoId,
-    addingChildTo, setAddingChildTo, collapsedIds, toggleCollapse, draggingId, dragOverId,
+    addingChildTo, setAddingChildTo, collapsedIds, toggleCollapse, dragEnabled: sortMode === "manual", draggingId, dragOverId,
     toggleTask, requestEdit, saveTaskText, saveTaskMemo, openEditModal, moveTask, deleteTask, openAiModal, addChild, onRowPointerDown,
   }
 
@@ -842,7 +856,7 @@ export default function Home() {
         {tab === "tasks" && (
           <div className="card">
             <div style={{ padding: "10px 20px", background: "#eef2ff", borderBottom: "1px solid #c7d2fe", fontSize: "12px", color: "#4338ca" }}>
-              💡 <strong>🤖 AI分解</strong>：タスクを「すぐ動ける粒度」に分解します。各タスク横の🤖でサブタスクとして追加、対話で細かく調整できます。／ <strong>並び替え</strong>：タスクを長押ししてドラッグ。
+              💡 <strong>🤖 AI分解</strong>：タスクを「すぐ動ける粒度」に分解します。各タスク横の🤖でサブタスクとして追加、対話で細かく調整できます。／ <strong>並び替え</strong>：「✋手動」で長押しドラッグ、「🔀期限・優先度」で自動整列。
             </div>
 
             {/* 入力エリア */}
@@ -899,13 +913,24 @@ export default function Home() {
               )}
             </div>
 
-            {/* フィルター（未完了/完了） */}
-            <div className="filter-tabs">
+            {/* フィルター（未完了/完了）＋ 並び替え切替 */}
+            <div className="filter-tabs" style={{ alignItems: "center" }}>
               {(["active", "done"] as Filter[]).map(f => (
                 <button key={f} className={`filter-tab ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
                   {f === "active" ? "未完了" : "完了"}
                 </button>
               ))}
+              <div style={{ marginLeft: "auto", display: "flex", gap: "2px", background: "#f3f4f6", borderRadius: "7px", padding: "2px" }}>
+                {([["manual", "✋ 手動"], ["auto", "🔀 期限・優先度"]] as ["manual" | "auto", string][]).map(([m, label]) => (
+                  <button key={m} onClick={() => setSortMode(m)} title={m === "manual" ? "ドラッグで並び替え" : "期限が早い順→残りは優先度順"}
+                    style={{
+                      padding: "4px 9px", borderRadius: "5px", border: "none", cursor: "pointer", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap",
+                      background: sortMode === m ? "white" : "transparent",
+                      color: sortMode === m ? "#111827" : "#6b7280",
+                      boxShadow: sortMode === m ? "0 1px 2px rgba(0,0,0,.12)" : "none",
+                    }}>{label}</button>
+                ))}
+              </div>
             </div>
 
             {/* タスクリスト */}
