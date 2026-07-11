@@ -39,11 +39,6 @@ interface Memo {
   updated_at: string
 }
 
-interface ChatMsg {
-  role: "user" | "assistant"
-  content: string
-}
-
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"]
 
 const PRIORITY_CONFIG = {
@@ -106,15 +101,31 @@ function fmtNextRecurrence(task: Task): string {
   return `${dt.getMonth() + 1}/${dt.getDate()}(${DAY_LABELS[dt.getDay()]})`
 }
 
-// 自動並び替え：期限ありを上（期限が早い順）→ 残りは優先度の高い順
+// 並び替え共通：繰り返し（毎日/繰り返し）タスクを常に最上部へ
+function recurringFirst(a: Task, b: Task): number {
+  if (a.is_recurring && !b.is_recurring) return -1
+  if (!a.is_recurring && b.is_recurring) return 1
+  return 0
+}
+
+// 自動並び替え：繰り返しを最上部 → 期限ありを上（期限が早い順）→ 残りは優先度の高い順
 const PRANK: Record<Priority, number> = { high: 0, mid: 1, low: 2 }
 function effDue(t: Task): string | null { return t.is_recurring ? null : t.due_date }
 function autoCompare(a: Task, b: Task): number {
+  const rec = recurringFirst(a, b)
+  if (rec !== 0) return rec
   const ad = effDue(a), bd = effDue(b)
   if (ad && !bd) return -1
   if (!ad && bd) return 1
   if (ad && bd && ad !== bd) return ad < bd ? -1 : 1
   return (PRANK[a.priority] ?? 1) - (PRANK[b.priority] ?? 1)
+}
+
+// 手動並び替え：繰り返しを最上部 → sort_order 順
+function manualCompare(a: Task, b: Task): number {
+  const rec = recurringFirst(a, b)
+  if (rec !== 0) return rec
+  return (a.sort_order ?? Number.POSITIVE_INFINITY) - (b.sort_order ?? Number.POSITIVE_INFINITY)
 }
 
 // テキスト中の URL をクリック可能なリンクに変換
@@ -168,26 +179,39 @@ function TaskMemoEditor({ initial, onSave, onCancel }: { initial: string; onSave
   )
 }
 
-function ChildTaskInput({ onAdd, onCancel }: { onAdd: (v: string) => void; onCancel: () => void }) {
+function ChildTaskInput({ onAdd, onCancel }: { onAdd: (text: string, priority: Priority, start: string, due: string) => void; onCancel: () => void }) {
   const [v, setV] = useState("")
+  const [priority, setPriority] = useState<Priority>("mid")
+  const [start, setStart] = useState("")
+  const [due, setDue] = useState("")
+  const submit = () => { if (v.trim()) onAdd(v, priority, start, due) }
   return (
-    <div style={{ display: "flex", gap: "6px", padding: "6px 12px 6px 44px", background: "#f9fafb" }}>
-      <input
-        autoFocus
-        value={v}
-        onChange={e => setV(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === "Enter" && v.trim()) { onAdd(v); }
-          if (e.key === "Escape") onCancel()
-        }}
-        placeholder="サブタスクを入力..."
-        style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", outline: "none" }}
-      />
-      <button
-        onClick={() => { if (v.trim()) onAdd(v) }}
-        style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "13px" }}
-      >追加</button>
-      <button onClick={onCancel} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280" }}>×</button>
+    <div style={{ padding: "8px 12px 10px 44px", background: "#f9fafb", display: "flex", flexDirection: "column", gap: "6px" }}>
+      <div style={{ display: "flex", gap: "6px" }}>
+        <input
+          autoFocus
+          value={v}
+          onChange={e => setV(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel() }}
+          placeholder="サブタスクを入力..."
+          style={{ flex: 1, minWidth: 0, border: "1px solid #e5e7eb", borderRadius: "6px", padding: "6px 10px", fontSize: "13px", outline: "none" }}
+        />
+        <button onClick={submit} style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "6px", padding: "6px 12px", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>追加</button>
+        <button onClick={onCancel} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", flexShrink: 0 }}>×</button>
+      </div>
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+        <select value={priority} onChange={e => setPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "6px", padding: "5px 6px", fontSize: "12px", outline: "none" }}>
+          <option value="high">🔴 高</option>
+          <option value="mid">🟠 中</option>
+          <option value="low">🟢 低</option>
+        </select>
+        <label style={{ fontSize: "11px", color: "#6b7280", display: "flex", alignItems: "center", gap: "3px" }}>
+          開始<input type="date" value={start} onChange={e => setStart(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "6px", padding: "5px 6px", fontSize: "12px", outline: "none", maxWidth: "130px" }} />
+        </label>
+        <label style={{ fontSize: "11px", color: "#6b7280", display: "flex", alignItems: "center", gap: "3px" }}>
+          期限<input type="date" value={due} onChange={e => setDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "6px", padding: "5px 6px", fontSize: "12px", outline: "none", maxWidth: "130px" }} />
+        </label>
+      </div>
     </div>
   )
 }
@@ -213,10 +237,8 @@ interface TaskCtx {
   saveTaskText: (id: string, text: string) => void
   saveTaskMemo: (id: string, memo: string) => void
   openEditModal: (task: Task) => void
-  moveTask: (id: string, mode: string) => void
   deleteTask: (id: string) => void
-  openAiModal: (text: string, id: string) => void
-  addChild: (parentId: string, text: string) => void
+  addChild: (parentId: string, text: string, priority: Priority, start: string, due: string) => void
   onRowPointerDown: (e: React.PointerEvent, id: string) => void
 }
 
@@ -238,10 +260,11 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
         className="task-item"
         {...(level === 0 ? { "data-task-id": task.id } : {})}
         style={{
-          paddingLeft: isChild ? "10px" : "20px",
+          paddingLeft: isChild ? "8px" : "14px",
+          paddingRight: "8px",
           paddingTop: isChild ? "7px" : undefined,
           paddingBottom: isChild ? "7px" : undefined,
-          flexWrap: "wrap", gap: "6px",
+          flexWrap: "nowrap", gap: "6px", alignItems: "center",
           opacity: isDragging ? 0.4 : 1,
           background: isDragging ? "#eef2ff" : (isChild ? "#fcfcfd" : undefined),
           borderTop: isDragTarget ? "2px solid #6366f1" : undefined,
@@ -255,11 +278,11 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
         {/* 折りたたみ / ツリー記号 */}
         {hasChildren ? (
           <button onClick={() => ctx.toggleCollapse(task.id)} title={collapsed ? "展開" : "折りたたみ"}
-            style={{ border: "none", background: "none", cursor: "pointer", color: "#9ca3af", fontSize: "10px", width: "16px", flexShrink: 0, padding: 0, lineHeight: 1 }}>
+            style={{ border: "none", background: "none", cursor: "pointer", color: "#9ca3af", fontSize: "10px", width: "14px", flexShrink: 0, padding: 0, lineHeight: 1 }}>
             {collapsed ? "▶" : "▼"}
           </button>
         ) : isChild ? (
-          <span style={{ color: "#d1d5db", fontSize: "12px", flexShrink: 0, width: "12px", textAlign: "center" }}>↳</span>
+          <span style={{ color: "#d1d5db", fontSize: "12px", flexShrink: 0, width: "10px", textAlign: "center" }}>↳</span>
         ) : null}
 
         <div className={`task-check ${done ? "task-check-done" : ""}`}
@@ -268,58 +291,61 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
           {done ? "✓" : ""}
         </div>
 
-        {task.is_recurring && (
-          <span style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", fontWeight: 700, flexShrink: 0 }}>
-            🔁{task.recurring_days ? task.recurring_days.split(",").map(d => DAY_LABELS[Number(d)]).join("・") : "毎日"}
-          </span>
-        )}
+        {/* コンテンツ群（バッジ・テキスト・日付）: 幅が足りなければ内部で折り返す */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", gap: "5px", rowGap: "3px" }}>
+          {task.is_recurring && (
+            <span style={{ background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc", borderRadius: "4px", padding: "1px 5px", fontSize: "10px", fontWeight: 700, flexShrink: 0 }}>
+              🔁{task.recurring_days ? task.recurring_days.split(",").map(d => DAY_LABELS[Number(d)]).join("・") : "毎日"}
+            </span>
+          )}
 
-        <span style={{
-          background: pc.bg, color: pc.color, border: `1px solid ${pc.border}`,
-          borderRadius: "4px", padding: "1px 6px", fontSize: isChild ? "10px" : "11px", fontWeight: 700, flexShrink: 0,
-        }}>{pc.label}</span>
+          <span style={{
+            background: pc.bg, color: pc.color, border: `1px solid ${pc.border}`,
+            borderRadius: "4px", padding: "1px 6px", fontSize: isChild ? "10px" : "11px", fontWeight: 700, flexShrink: 0,
+          }}>{pc.label}</span>
 
-        {isEditing ? (
-          <InlineTextEdit
-            initial={task.text}
-            onSave={(v) => ctx.saveTaskText(task.id, v)}
-            onCancel={() => ctx.setEditingId(null)}
-          />
-        ) : (
-          <div
-            className={`task-text ${done ? "task-text-done" : ""}`}
-            style={{ flex: 1, fontSize: isChild ? "13px" : "14px", color: isChild && !done ? "#4b5563" : undefined }}
-            onClick={() => ctx.requestEdit(task.id)}
-          >{task.text}</div>
-        )}
+          {isEditing ? (
+            <InlineTextEdit
+              initial={task.text}
+              onSave={(v) => ctx.saveTaskText(task.id, v)}
+              onCancel={() => ctx.setEditingId(null)}
+            />
+          ) : (
+            <div
+              className={`task-text ${done ? "task-text-done" : ""}`}
+              style={{ flex: "1 1 auto", minWidth: 0, fontSize: isChild ? "13px" : "14px", color: isChild && !done ? "#4b5563" : undefined, overflowWrap: "anywhere", wordBreak: "break-word" }}
+              onClick={() => ctx.requestEdit(task.id)}
+            >{task.text}</div>
+          )}
 
-        {/* 日付：繰り返しは「次回」、通常は開始〜期限 */}
-        {task.is_recurring ? (
-          <div className="task-due" style={{ color: "#0369a1", fontWeight: 600 }}>次回 {fmtNextRecurrence(task)}</div>
-        ) : (
-          <>
-            {task.start_date && <div className="task-due" style={{ color: "#6b7280" }}>{fmtShort(task.start_date)}〜</div>}
-            {task.due_date && (
-              <div className={`task-due ${!done && isOverdue(task.due_date) ? "task-due-overdue" : ""}`}>
-                {task.start_date ? fmtShort(task.due_date) : fmtDue(task.due_date)}
-              </div>
-            )}
-          </>
-        )}
+          {/* 日付：繰り返しは「次回」、通常は開始〜期限 */}
+          {task.is_recurring ? (
+            <div className="task-due" style={{ color: "#0369a1", fontWeight: 600, flexShrink: 0 }}>次回 {fmtNextRecurrence(task)}</div>
+          ) : (
+            <>
+              {task.start_date && <div className="task-due" style={{ color: "#6b7280", flexShrink: 0 }}>{fmtShort(task.start_date)}〜</div>}
+              {task.due_date && (
+                <div className={`task-due ${!done && isOverdue(task.due_date) ? "task-due-overdue" : ""}`} style={{ flexShrink: 0 }}>
+                  {task.start_date ? fmtShort(task.due_date) : fmtDue(task.due_date)}
+                </div>
+              )}
+            </>
+          )}
 
-        {/* サブタスク数バッジ */}
-        {hasChildren && (
-          <span style={{ fontSize: "10px", color: "#6b7280", background: "#f3f4f6", borderRadius: "4px", padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>サブ{children.length}</span>
-        )}
+          {hasChildren && (
+            <span style={{ fontSize: "10px", color: "#6b7280", background: "#f3f4f6", borderRadius: "4px", padding: "1px 6px", fontWeight: 600, flexShrink: 0 }}>サブ{children.length}</span>
+          )}
+        </div>
 
-        <button onClick={() => ctx.openEditModal(task)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px", color: "#6b7280" }} title="編集">✏️</button>
-        <button onClick={() => ctx.setExpandedMemoId(isMemoOpen ? null : task.id)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "14px", padding: "2px 3px", opacity: task.memo ? 1 : 0.4 }} title="メモ">📝</button>
-        <button onClick={() => ctx.moveTask(task.id, task.mode || ctx.mode)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "12px", padding: "2px 3px", color: "#6b7280" }} title={ctx.mode === "work" ? "プライベートへ移動" : "仕事へ移動"}>{ctx.mode === "work" ? "🏠" : "💼"}</button>
-        {level < 2 && (
-          <button onClick={() => ctx.setAddingChildTo(task.id)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "15px", padding: "2px 3px" }} title="サブタスクを追加">＋</button>
-        )}
-        <button onClick={() => ctx.openAiModal(task.text, task.id)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px" }} title="AIで分解">🤖</button>
-        <button className="del-btn" onClick={() => ctx.deleteTask(task.id)}>×</button>
+        {/* アクション群（右端に固定） */}
+        <div style={{ display: "flex", alignItems: "center", gap: "1px", flexShrink: 0 }}>
+          <button onClick={() => ctx.openEditModal(task)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 2px", color: "#6b7280" }} title="編集">✏️</button>
+          <button onClick={() => ctx.setExpandedMemoId(isMemoOpen ? null : task.id)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "14px", padding: "2px 2px", opacity: task.memo ? 1 : 0.4 }} title="メモ">📝</button>
+          {level < 2 && (
+            <button onClick={() => ctx.setAddingChildTo(task.id)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "15px", padding: "2px 2px" }} title="サブタスクを追加">＋</button>
+          )}
+          <button className="del-btn" onClick={() => ctx.deleteTask(task.id)}>×</button>
+        </div>
       </div>
 
       {/* メモ表示（読み取り：リンク有効） */}
@@ -341,7 +367,7 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
       {/* サブタスク追加 */}
       {ctx.addingChildTo === task.id && (
         <ChildTaskInput
-          onAdd={(v) => { ctx.addChild(task.id, v); ctx.setAddingChildTo(null) }}
+          onAdd={(text, priority, start, due) => { ctx.addChild(task.id, text, priority, start, due); ctx.setAddingChildTo(null) }}
           onCancel={() => ctx.setAddingChildTo(null)}
         />
       )}
@@ -453,16 +479,6 @@ export default function Home() {
   const [memoTitle, setMemoTitle] = useState("")
   const [memoContent, setMemoContent] = useState("")
 
-  // AI Chat modal
-  const [aiModal, setAiModal] = useState(false)
-  const [aiTask, setAiTask] = useState("")
-  const [aiParentId, setAiParentId] = useState<string | null>(null)
-  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([])
-  const [chatInput, setChatInput] = useState("")
-  const [aiLoading, setAiLoading] = useState(false)
-  const [suggestions, setSuggestions] = useState<string[]>([])
-  const chatEndRef = useRef<HTMLDivElement>(null)
-
   // Drag & drop reorder
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -507,8 +523,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(), priority,
-          start_date: parentId ? null : (start || null),
-          due_date: parentId ? null : (due || null),
+          start_date: start || null,
+          due_date: due || null,
           mode, parent_id: parentId,
           is_recurring: parentId ? false : taskRecurring,
           recurring_days: parentId ? "" : taskRecurringDays.join(","),
@@ -531,8 +547,8 @@ export default function Home() {
     setTaskRecurring(false); setTaskRecurringDays([])
   }
 
-  function addChild(parentId: string, text: string) {
-    addTask(text, parentId, "mid", "", "")
+  function addChild(parentId: string, text: string, priority: Priority, start: string, due: string) {
+    addTask(text, parentId, priority, start, due)
   }
 
   async function toggleTask(id: string, task: Task) {
@@ -558,12 +574,6 @@ export default function Home() {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, memo } : t))
     setExpandedMemoId(null)
     await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo }) })
-  }
-
-  async function moveTask(id: string, currentMode: string) {
-    const newMode = currentMode === "work" ? "private" : "work"
-    setTasks(prev => prev.filter(t => t.id !== id))
-    await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: newMode }) })
   }
 
   async function deleteTask(id: string) {
@@ -671,41 +681,6 @@ export default function Home() {
     await fetch(`/api/memos/${id}`, { method: "DELETE" })
   }
 
-  // ---- AI Chat ----
-  function openAiModal(taskName: string, parentId: string | null = null) {
-    setAiTask(taskName)
-    setAiParentId(parentId)
-    setSuggestions([])
-    setChatInput("")
-    setAiModal(true)
-    setChatMsgs([{
-      role: "assistant",
-      content: `「${taskName}」のタスク分解をお手伝いします！\n\n下のテキストボックスに指示を入力して「送信」を押してください。\n\n例：\n・「細かく分解して」\n・「3ステップで分けて」\n・「今日中にできる粒度にして」`,
-    }])
-  }
-
-  async function startAiChat(taskName: string, history: ChatMsg[]) {
-    setAiLoading(true)
-    const res = await fetch("/api/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task: taskName, messages: history.map(m => ({ role: m.role, content: m.content })) }) })
-    const data = await res.json()
-    setChatMsgs(prev => [...prev, { role: "assistant", content: data.text }])
-    setSuggestions(data.suggestions || [])
-    setAiLoading(false)
-    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100)
-  }
-
-  async function sendChatMsg() {
-    if (!chatInput.trim() || aiLoading) return
-    const newHistory = [...chatMsgs, { role: "user", content: chatInput } as ChatMsg]
-    setChatMsgs(newHistory)
-    setChatInput("")
-    setSuggestions([])
-    await startAiChat(aiTask, newHistory)
-  }
-
-  async function addSuggestionAsTask(text: string) { await addTask(text, aiParentId, "mid", "", "") }
-  async function addAllSuggestions() { for (const s of suggestions) await addSuggestionAsTask(s); setSuggestions([]) }
-
   // ---- Derived ----
   const accentCls = mode === "work" ? "work" : "private"
   const accentColor = mode === "work" ? "#2563eb" : "#7c3aed"
@@ -725,7 +700,7 @@ export default function Home() {
   const parentBase = tasks.filter(t => !t.parent_id)
   const parentTasks = sortMode === "auto"
     ? [...parentBase].sort(autoCompare)
-    : [...parentBase].sort((a, b) => (a.sort_order ?? Number.POSITIVE_INFINITY) - (b.sort_order ?? Number.POSITIVE_INFINITY))
+    : [...parentBase].sort(manualCompare)
   const rangedParents = parentTasks.filter(inRange)
   const filteredParents = filter === "done"
     ? rangedParents.filter(t => isTaskDone(t))
@@ -825,7 +800,7 @@ export default function Home() {
   const ctx: TaskCtx = {
     tasks, mode, editingId, setEditingId, expandedMemoId, setExpandedMemoId,
     addingChildTo, setAddingChildTo, collapsedIds, toggleCollapse, dragEnabled: sortMode === "manual", draggingId, dragOverId,
-    toggleTask, requestEdit, saveTaskText, saveTaskMemo, openEditModal, moveTask, deleteTask, openAiModal, addChild, onRowPointerDown,
+    toggleTask, requestEdit, saveTaskText, saveTaskMemo, openEditModal, deleteTask, addChild, onRowPointerDown,
   }
 
   return (
@@ -864,10 +839,6 @@ export default function Home() {
         {/* ===== TASKS TAB ===== */}
         {tab === "tasks" && (
           <div className="card">
-            <div style={{ padding: "10px 20px", background: "#eef2ff", borderBottom: "1px solid #c7d2fe", fontSize: "12px", color: "#4338ca" }}>
-              💡 <strong>🤖 AI分解</strong>：タスクを「すぐ動ける粒度」に分解します。各タスク横の🤖でサブタスクとして追加、対話で細かく調整できます。／ <strong>並び替え</strong>：「✋手動」で長押しドラッグ、「🔀期限・優先度」で自動整列。
-            </div>
-
             {/* 入力エリア */}
             <div style={{ padding: "14px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: "8px" }}>
               <div style={{ display: "flex", gap: "6px" }}>
@@ -878,8 +849,6 @@ export default function Home() {
                   defaultValue=""
                   onKeyDown={e => { if (e.key === "Enter") handleAddMainTask() }}
                 />
-                <button onClick={() => { const v = taskInputRef.current?.value || ""; if (v.trim()) openAiModal(v, null) }}
-                  style={{ background: "#6366f1", color: "white", border: "none", borderRadius: "8px", padding: "8px 10px", cursor: "pointer", fontSize: "13px", fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0 }}>🤖</button>
                 <button className={`add-btn add-btn-${accentCls}`} style={{ flexShrink: 0 }} onClick={handleAddMainTask}>+</button>
               </div>
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
@@ -1145,53 +1114,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* ===== AI CHAT MODAL ===== */}
-      {aiModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div style={{ background: "white", borderRadius: "20px 20px 0 0", width: "100%", maxWidth: "600px", height: "85vh", display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: "16px" }}>🤖 AI タスク分解</div>
-                <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>「{aiTask}」</div>
-              </div>
-              <button onClick={() => setAiModal(false)} style={{ border: "none", background: "none", fontSize: "24px", cursor: "pointer", color: "#6b7280" }}>×</button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px" }}>
-              {chatMsgs.map((m, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                  <div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: m.role === "user" ? "#6366f1" : "#f3f4f6", color: m.role === "user" ? "white" : "#111827", fontSize: "13px", lineHeight: "1.6", whiteSpace: "pre-wrap" }}>{m.content}</div>
-                </div>
-              ))}
-              {aiLoading && (
-                <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                  <div style={{ background: "#f3f4f6", padding: "10px 14px", borderRadius: "16px 16px 16px 4px", fontSize: "13px", color: "#6b7280" }}>⏳ AIがタスクを実行できる粒度に分解しています...</div>
-                </div>
-              )}
-              {suggestions.length > 0 && !aiLoading && (
-                <div style={{ background: "#eef2ff", borderRadius: "12px", padding: "12px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: "#4338ca" }}>タスクに追加しますか？</span>
-                    <button onClick={addAllSuggestions} style={{ background: "#4338ca", color: "white", border: "none", borderRadius: "6px", padding: "4px 12px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>すべて追加</button>
-                  </div>
-                  {suggestions.map((s, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderTop: i > 0 ? "1px solid #c7d2fe" : "none" }}>
-                      <span style={{ fontSize: "13px", color: "#374151" }}>{s}</span>
-                      <button onClick={() => addSuggestionAsTask(s)} style={{ background: "white", color: "#6366f1", border: "1px solid #6366f1", borderRadius: "6px", padding: "3px 10px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>+ 追加</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            <div style={{ padding: "12px 16px", borderTop: "1px solid #e5e7eb", display: "flex", gap: "8px" }}>
-              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendChatMsg()} placeholder="「もっと具体的に」「最初のステップを細かく」など..." style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "10px", padding: "10px 14px", fontSize: "14px", outline: "none" }} />
-              <button onClick={sendChatMsg} disabled={!chatInput.trim() || aiLoading} style={{ background: chatInput.trim() && !aiLoading ? "#6366f1" : "#e5e7eb", color: chatInput.trim() && !aiLoading ? "white" : "#9ca3af", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: chatInput.trim() && !aiLoading ? "pointer" : "not-allowed", fontWeight: 600 }}>送信</button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }
