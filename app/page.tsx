@@ -54,7 +54,15 @@ const PRIORITY_CONFIG = {
   low:  { label: "低", bg: "#dcfce7", color: "#16a34a", border: "#86efac" },
 }
 
-function today() { return new Date().toISOString().split("T")[0] }
+// ローカル時刻基準で YYYY-MM-DD を返す
+// （toISOString() はUTCのため、JSTでは 0:00〜8:59 が前日になってしまう）
+function toLocalISO(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+function today() { return toLocalISO(new Date()) }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2) }
 
@@ -95,7 +103,7 @@ function nextRecurrenceDate(task: Task): string {
   const base = new Date(); base.setHours(0, 0, 0, 0)
   for (let i = doneToday ? 1 : 0; i < 21; i++) {
     const d = new Date(base); d.setDate(base.getDate() + i)
-    if (days.includes(d.getDay())) return d.toISOString().split("T")[0]
+    if (days.includes(d.getDay())) return toLocalISO(d)
   }
   return today()
 }
@@ -498,6 +506,16 @@ export default function Home() {
   // Pct debounce
   const pctTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
+  // トースト通知
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const notify = useCallback((msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 3500)
+  }, [])
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
+
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
@@ -511,11 +529,28 @@ export default function Home() {
       setGoals(Array.isArray(g) ? g : [])
       setMemos(Array.isArray(m) ? m : [])
       setHighlights({ year: h?.year || "", month: h?.month || "" })
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      // 失敗時に前モードのデータが残らないようクリアし、エラーを通知（#4）
+      setTasks([]); setGoals([]); setMemos([])
+      setHighlights({ year: "", month: "" })
+      notify("読み込みに失敗しました")
+    }
     finally { setLoading(false) }
-  }, [mode])
+  }, [mode, notify])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // 変更系API共通：失敗を検知して通知し、サーバー状態と再同期する（#3）
+  const apiMutate = useCallback(async (url: string, init: RequestInit, errMsg: string): Promise<boolean> => {
+    try {
+      const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init })
+      if (!res.ok) { notify(errMsg); fetchAll(); return false }
+      return true
+    } catch {
+      notify("通信エラーが発生しました"); fetchAll(); return false
+    }
+  }, [notify, fetchAll])
 
   // 並び順の選択を記憶（リロード後も保持。モード共通）
   useEffect(() => {
@@ -543,10 +578,10 @@ export default function Home() {
         }),
       })
       const json = await res.json()
-      if (!res.ok) { alert(`タスク追加エラー: ${json.error || res.status}`); return }
+      if (!res.ok) { notify(`タスク追加に失敗しました: ${json?.error || res.status}`); return }
       await fetchAll()
-    } catch (e) {
-      alert(`通信エラー: ${e}`)
+    } catch {
+      notify("通信エラーが発生しました")
     }
   }
 
@@ -564,33 +599,29 @@ export default function Home() {
   }
 
   async function toggleTask(id: string, task: Task) {
-    if (task.is_recurring) {
-      const isDoneToday = task.recurring_done_date === today()
-      const newDate = isDoneToday ? null : today()
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, recurring_done_date: newDate } : t))
-      await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recurring_done_date: newDate }) })
-    } else {
-      setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !task.done } : t))
-      await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: !task.done }) })
-    }
+    const body = task.is_recurring
+      ? { recurring_done_date: task.recurring_done_date === today() ? null : today() }
+      : { done: !task.done }
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...body } : t))
+    await apiMutate(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }, "完了状態の保存に失敗しました")
   }
 
   async function saveTaskText(id: string, text: string) {
     if (!text.trim()) { setEditingId(null); return }
     setTasks(prev => prev.map(t => t.id === id ? { ...t, text } : t))
     setEditingId(null)
-    await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) })
+    await apiMutate(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ text }) }, "タスク名の保存に失敗しました")
   }
 
   async function saveTaskMemo(id: string, memo: string) {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, memo } : t))
     setExpandedMemoId(null)
-    await fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo }) })
+    await apiMutate(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) }, "メモの保存に失敗しました")
   }
 
   async function deleteTask(id: string) {
     setTasks(prev => prev.filter(t => t.id !== id && t.parent_id !== id))
-    await fetch(`/api/tasks/${id}`, { method: "DELETE" })
+    await apiMutate(`/api/tasks/${id}`, { method: "DELETE" }, "タスクの削除に失敗しました")
   }
 
   function openEditModal(task: Task) {
@@ -619,23 +650,29 @@ export default function Home() {
     }
     setTasks(prev => prev.map(t => t.id === editModal.id ? { ...t, ...updates } : t))
     setEditModal(null)
-    await fetch(`/api/tasks/${editModal.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) })
+    await apiMutate(`/api/tasks/${editModal.id}`, { method: "PATCH", body: JSON.stringify(updates) }, "タスクの保存に失敗しました")
   }
 
   // ---- Goal actions ----
   async function addGoal() {
     if (!goalText.trim()) return
-    const res = await fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: goalText, due_date: goalDue || null, mode }) })
-    const goal: Goal = await res.json()
-    setGoals(prev => [goal, ...prev])
-    setGoalText(""); setGoalDue("")
+    try {
+      const res = await fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: goalText, due_date: goalDue || null, mode }) })
+      const goal: Goal = await res.json()
+      // res.ok と id を検査（失敗時に壊れた行が混入するのを防ぐ / #5）
+      if (!res.ok || !goal?.id) { notify("目標の追加に失敗しました"); return }
+      setGoals(prev => [goal, ...prev])
+      setGoalText(""); setGoalDue("")
+    } catch {
+      notify("通信エラーが発生しました")
+    }
   }
 
   function updateGoalPct(id: string, pct: number) {
     setGoals(prev => prev.map(g => g.id === id ? { ...g, pct } : g))
     clearTimeout(pctTimers.current[id])
     pctTimers.current[id] = setTimeout(() => {
-      fetch(`/api/goals/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pct }) })
+      apiMutate(`/api/goals/${id}`, { method: "PATCH", body: JSON.stringify({ pct }) }, "進捗の保存に失敗しました")
     }, 400)
   }
 
@@ -649,18 +686,18 @@ export default function Home() {
     const updates = { text: goalEditForm.text.trim(), due_date: goalEditForm.due_date || null, pct: goalEditForm.pct }
     setGoals(prev => prev.map(g => g.id === editGoalModal.id ? { ...g, ...updates } : g))
     setEditGoalModal(null)
-    await fetch(`/api/goals/${editGoalModal.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) })
+    await apiMutate(`/api/goals/${editGoalModal.id}`, { method: "PATCH", body: JSON.stringify(updates) }, "目標の保存に失敗しました")
   }
 
   async function deleteGoal(id: string) {
     setGoals(prev => prev.filter(g => g.id !== id))
-    await fetch(`/api/goals/${id}`, { method: "DELETE" })
+    await apiMutate(`/api/goals/${id}`, { method: "DELETE" }, "目標の削除に失敗しました")
   }
 
   // ---- Highlights ----
   async function saveHighlight(kind: "year" | "month", text: string) {
     setHighlights(prev => ({ ...prev, [kind]: text }))
-    await fetch("/api/highlights", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode, [`${kind}_text`]: text }) })
+    await apiMutate("/api/highlights", { method: "PATCH", body: JSON.stringify({ mode, [`${kind}_text`]: text }) }, "目標の保存に失敗しました")
   }
 
   // ---- Memo actions ----
@@ -680,14 +717,14 @@ export default function Home() {
     const payload = { title: memoTitle, content: memoContent, tags: normalizedTags }
     if (memoModal.id) {
       const res = await fetch(`/api/memos/${memoModal.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-      if (!res.ok) { alert("メモの保存に失敗しました"); return }
+      if (!res.ok) { notify("メモの保存に失敗しました"); return }
       setMemos(prev => prev.map(m => m.id === memoModal.id ? { ...m, ...payload } : m))
       setMemoTags(normalizedTags)
       setMemoModal(prev => ({ ...prev, editing: false }))
     } else {
       const res = await fetch("/api/memos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, mode }) })
       const memo: Memo = await res.json()
-      if (!res.ok || !memo?.id) { alert("メモの作成に失敗しました"); return }
+      if (!res.ok || !memo?.id) { notify("メモの作成に失敗しました"); return }
       setMemos(prev => [memo, ...prev])
       setMemoTags(normalizedTags)
       setMemoModal({ open: true, editing: false, id: memo.id })
@@ -697,7 +734,7 @@ export default function Home() {
   async function deleteMemo(id: string) {
     setMemos(prev => prev.filter(m => m.id !== id))
     setMemoModal({ open: false, editing: false, id: null })
-    await fetch(`/api/memos/${id}`, { method: "DELETE" })
+    await apiMutate(`/api/memos/${id}`, { method: "DELETE" }, "メモの削除に失敗しました")
   }
 
   // ---- Derived ----
@@ -766,9 +803,14 @@ export default function Home() {
     newIds.splice(to, 0, srcId)
     const orderMap = new Map(newIds.map((id, i) => [id, i]))
     setTasks(prev => prev.map(t => orderMap.has(t.id) ? { ...t, sort_order: orderMap.get(t.id)! } : t))
-    await Promise.all(newIds.map((id, i) =>
-      fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sort_order: i }) })
-    ))
+    try {
+      const results = await Promise.all(newIds.map((id, i) =>
+        fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sort_order: i }) })
+      ))
+      if (results.some(r => !r.ok)) { notify("並び順の保存に失敗しました"); fetchAll() }
+    } catch {
+      notify("通信エラーが発生しました"); fetchAll()
+    }
   }
   reorderRef.current = reorderTasks
 
@@ -1203,6 +1245,22 @@ export default function Home() {
         </div>
       )}
 
+      {/* ===== TOAST ===== */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed", left: "50%", bottom: "24px", transform: "translateX(-50%)",
+            background: "#111827", color: "white", padding: "10px 18px", borderRadius: "10px",
+            fontSize: "13px", fontWeight: 600, zIndex: 500, maxWidth: "90vw", textAlign: "center",
+            boxShadow: "0 4px 16px rgba(0,0,0,.25)",
+          }}
+          onClick={() => setToast(null)}
+        >
+          ⚠️ {toast}
+        </div>
+      )}
     </>
   )
 }
