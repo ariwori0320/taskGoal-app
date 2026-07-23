@@ -199,7 +199,13 @@ function ChildTaskInput({ onAdd, onCancel }: { onAdd: (text: string, priority: P
   const [priority, setPriority] = useState<Priority>("mid")
   const [start, setStart] = useState("")
   const [due, setDue] = useState("")
-  const submit = () => { if (v.trim()) onAdd(v, priority, start, due) }
+  // 連打（Enter2回など）での重複追加を防ぐ（#7）
+  const sentRef = useRef(false)
+  const submit = () => {
+    if (!v.trim() || sentRef.current) return
+    sentRef.current = true
+    onAdd(v, priority, start, due)
+  }
   return (
     <div style={{ padding: "8px 12px 10px 44px", background: "#f9fafb", display: "flex", flexDirection: "column", gap: "6px" }}>
       <div style={{ display: "flex", gap: "6px" }}>
@@ -234,7 +240,7 @@ function ChildTaskInput({ onAdd, onCancel }: { onAdd: (text: string, priority: P
 // ===== タスク行コンポーネント（モジュールレベル・再帰） =====
 
 interface TaskCtx {
-  tasks: Task[]
+  childrenMap: Map<string, Task[]>
   mode: Mode
   editingId: string | null
   setEditingId: (id: string | null) => void
@@ -258,7 +264,7 @@ interface TaskCtx {
 }
 
 function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCtx }) {
-  const children = ctx.tasks.filter(t => t.parent_id === task.id)
+  const children = ctx.childrenMap.get(task.id) ?? []
   const hasChildren = children.length > 0
   const collapsed = ctx.collapsedIds.has(task.id)
   const isChild = level > 0
@@ -578,20 +584,33 @@ export default function Home() {
         }),
       })
       const json = await res.json()
-      if (!res.ok) { notify(`タスク追加に失敗しました: ${json?.error || res.status}`); return }
-      await fetchAll()
+      if (!res.ok || !json?.id) { notify(`タスク追加に失敗しました: ${json?.error || res.status}`); return }
+      // 全件再取得せず、作成されたタスクを差し込む（#9）
+      setTasks(prev => [json as Task, ...prev])
     } catch {
       notify("通信エラーが発生しました")
     }
   }
 
+  // 連打による重複作成を防ぐ（#7）
+  // state だけだと同一tick内の2回目でまだ false のため、ref で同期的に判定する
+  const submittingRef = useRef(false)
+  const [submitting, setSubmitting] = useState(false)
+
   async function handleAddMainTask() {
     const val = taskInputRef.current?.value || ""
-    if (!val.trim()) return
-    await addTask(val, null, taskPriority, taskStart, taskDue)
-    if (taskInputRef.current) taskInputRef.current.value = ""
-    setTaskPriority("mid"); setTaskStart(""); setTaskDue("")
-    setTaskRecurring(false); setTaskRecurringDays([])
+    if (!val.trim() || submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      await addTask(val, null, taskPriority, taskStart, taskDue)
+      if (taskInputRef.current) taskInputRef.current.value = ""
+      setTaskPriority("mid"); setTaskStart(""); setTaskDue("")
+      setTaskRecurring(false); setTaskRecurringDays([])
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
   }
 
   function addChild(parentId: string, text: string, priority: Priority, start: string, due: string) {
@@ -655,7 +674,9 @@ export default function Home() {
 
   // ---- Goal actions ----
   async function addGoal() {
-    if (!goalText.trim()) return
+    if (!goalText.trim() || submittingRef.current) return
+    submittingRef.current = true
+    setSubmitting(true)
     try {
       const res = await fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: goalText, due_date: goalDue || null, mode }) })
       const goal: Goal = await res.json()
@@ -665,6 +686,9 @@ export default function Home() {
       setGoalText(""); setGoalDue("")
     } catch {
       notify("通信エラーが発生しました")
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -753,6 +777,15 @@ export default function Home() {
     return true
   }
 
+  // parent_id → 子タスク の Map を1度だけ構築（各行での filter を廃止 / #12）
+  const childrenMap = new Map<string, Task[]>()
+  for (const t of tasks) {
+    if (!t.parent_id) continue
+    const arr = childrenMap.get(t.parent_id)
+    if (arr) arr.push(t)
+    else childrenMap.set(t.parent_id, [t])
+  }
+
   const parentBase = tasks.filter(t => !t.parent_id)
   const parentTasks = sortMode === "auto"
     ? [...parentBase].sort(autoCompare)
@@ -793,24 +826,53 @@ export default function Home() {
     setEditingId(id)
   }
 
-  async function reorderTasks(srcId: string, overId: string) {
-    if (!srcId || !overId || srcId === overId) return
-    const ids = filteredParents.map(t => t.id)
-    const from = ids.indexOf(srcId), to = ids.indexOf(overId)
-    if (from === -1 || to === -1) return
-    const newIds = [...ids]
-    newIds.splice(from, 1)
-    newIds.splice(to, 0, srcId)
-    const orderMap = new Map(newIds.map((id, i) => [id, i]))
+  // 表示中の全親タスクを整数で採番し直す（初回や値が詰まった時のみ実行 / #11の重複も解消）
+  async function renumberAll(orderedIds: string[]) {
+    const orderMap = new Map(orderedIds.map((id, i) => [id, i]))
     setTasks(prev => prev.map(t => orderMap.has(t.id) ? { ...t, sort_order: orderMap.get(t.id)! } : t))
     try {
-      const results = await Promise.all(newIds.map((id, i) =>
+      const results = await Promise.all(orderedIds.map((id, i) =>
         fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sort_order: i }) })
       ))
       if (results.some(r => !r.ok)) { notify("並び順の保存に失敗しました"); fetchAll() }
     } catch {
       notify("通信エラーが発生しました"); fetchAll()
     }
+  }
+
+  async function reorderTasks(srcId: string, overId: string) {
+    if (!srcId || !overId || srcId === overId) return
+    const list = filteredParents
+    const from = list.findIndex(t => t.id === srcId)
+    const to = list.findIndex(t => t.id === overId)
+    if (from === -1 || to === -1) return
+
+    // 移動後の並びを作り、挿入位置の前後から新しい sort_order を求める
+    const moved = [...list]
+    const [src] = moved.splice(from, 1)
+    moved.splice(to, 0, src)
+    const pv = typeof moved[to - 1]?.sort_order === "number" ? moved[to - 1].sort_order as number : null
+    const nv = typeof moved[to + 1]?.sort_order === "number" ? moved[to + 1].sort_order as number : null
+
+    let newVal: number | null = null
+    if (pv === null && nv !== null) newVal = nv - 1
+    else if (pv !== null && nv === null) newVal = pv + 1
+    else if (pv !== null && nv !== null && nv - pv > 1e-6) newVal = (pv + nv) / 2
+    // pv/nv が両方nullか、値が詰まっている場合は newVal = null（採番し直しへ）
+
+    if (newVal !== null) {
+      // 移動した1件だけ更新（従来は表示中の全件をPATCHしていた / #8）
+      setTasks(prev => prev.map(t => t.id === srcId ? { ...t, sort_order: newVal } : t))
+      await apiMutate(`/api/tasks/${srcId}`, { method: "PATCH", body: JSON.stringify({ sort_order: newVal }) }, "並び順の保存に失敗しました")
+      return
+    }
+
+    // フォールバック: 完了/未完了を問わず全親タスクを採番し直す（#11の重複解消）
+    const rest = parentTasks.filter(t => t.id !== srcId)
+    const overIdx = rest.findIndex(t => t.id === overId)
+    const insertAt = overIdx === -1 ? rest.length : (from < to ? overIdx + 1 : overIdx)
+    rest.splice(insertAt, 0, src)
+    await renumberAll(rest.map(t => t.id))
   }
   reorderRef.current = reorderTasks
 
@@ -820,49 +882,68 @@ export default function Home() {
     return row?.getAttribute("data-task-id") ?? null
   }, [])
 
-  const onWinMove = useCallback((e: PointerEvent) => {
-    if (!draggingRef.current) {
-      const dx = Math.abs(e.clientX - startPt.current.x)
-      const dy = Math.abs(e.clientY - startPt.current.y)
-      if (dx > 8 || dy > 8) {
-        if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null }
-        window.removeEventListener("pointermove", onWinMove)
-      }
-      return
-    }
-    const over = pointAt(e.clientX, e.clientY)
-    if (over !== dragOverRef.current) { dragOverRef.current = over; setDragOverId(over) }
-  }, [pointAt])
+  // 進行中ドラッグのリスナ解除関数を保持（確実に後始末するため / #6）
+  const dragCleanupRef = useRef<(() => void) | null>(null)
 
-  const onWinUp = useCallback((e: PointerEvent) => {
+  // ドラッグ状態を完全にリセットする。どの終了経路（up / cancel / スクロール判定 / アンマウント）でも必ず通す
+  const resetDrag = useCallback((didDrag: boolean) => {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null }
-    window.removeEventListener("pointermove", onWinMove)
-    window.removeEventListener("pointerup", onWinUp)
-    const src = draggingRef.current
-    const over = src ? pointAt(e.clientX, e.clientY) : null
-    if (src) { suppressClickRef.current = true; setTimeout(() => { suppressClickRef.current = false }, 300) }
+    dragCleanupRef.current?.()
+    dragCleanupRef.current = null
+    if (didDrag) {
+      suppressClickRef.current = true
+      setTimeout(() => { suppressClickRef.current = false }, 300)
+    }
     draggingRef.current = null
     dragOverRef.current = null
     setDraggingId(null)
     setDragOverId(null)
-    if (src && over && over !== src) reorderRef.current(src, over)
-  }, [pointAt, onWinMove])
+  }, [])
 
   const onRowPointerDown = useCallback((e: React.PointerEvent, id: string) => {
     if (e.pointerType === "mouse" && e.button !== 0) return
     const target = e.target as HTMLElement
     if (target.closest("button, input, textarea, a, select, .task-check")) return // 操作系からはドラッグ開始しない
+
+    resetDrag(false) // 前回のドラッグが残っていれば確実に解除
     startPt.current = { x: e.clientX, y: e.clientY }
-    draggingRef.current = null
-    if (pressTimer.current) clearTimeout(pressTimer.current)
+
+    const onMove = (ev: PointerEvent) => {
+      if (!draggingRef.current) {
+        // 長押し確定前に動いた = スクロール意図とみなして中止
+        const dx = Math.abs(ev.clientX - startPt.current.x)
+        const dy = Math.abs(ev.clientY - startPt.current.y)
+        if (dx > 8 || dy > 8) resetDrag(false)
+        return
+      }
+      const over = pointAt(ev.clientX, ev.clientY)
+      if (over !== dragOverRef.current) { dragOverRef.current = over; setDragOverId(over) }
+    }
+    const onUp = (ev: PointerEvent) => {
+      const src = draggingRef.current
+      const over = src ? pointAt(ev.clientX, ev.clientY) : null
+      resetDrag(!!src)
+      if (src && over && over !== src) reorderRef.current(src, over)
+    }
+    // OSジェスチャ等で中断された場合。これが無いとドラッグ状態が残り、
+    // touchmove の preventDefault によりページがスクロールできなくなる（#6）
+    const onCancel = () => resetDrag(!!draggingRef.current)
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onCancel)
+    dragCleanupRef.current = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
+    }
+
     pressTimer.current = setTimeout(() => {
       draggingRef.current = id
       setDraggingId(id)
       if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(15)
     }, 280)
-    window.addEventListener("pointermove", onWinMove)
-    window.addEventListener("pointerup", onWinUp)
-  }, [onWinMove, onWinUp])
+  }, [pointAt, resetDrag])
 
   // ドラッグ中はスクロールを抑止（タッチ）
   useEffect(() => {
@@ -871,8 +952,15 @@ export default function Home() {
     return () => document.removeEventListener("touchmove", handler)
   }, [])
 
+  // アンマウント時にリスナとドラッグ状態を確実に解放（#6 のリーク対策）
+  useEffect(() => () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current)
+    dragCleanupRef.current?.()
+    draggingRef.current = null
+  }, [])
+
   const ctx: TaskCtx = {
-    tasks, mode, editingId, setEditingId, expandedMemoId, setExpandedMemoId,
+    childrenMap, mode, editingId, setEditingId, expandedMemoId, setExpandedMemoId,
     addingChildTo, setAddingChildTo, collapsedIds, toggleCollapse, dragEnabled: sortMode === "manual", draggingId, dragOverId,
     toggleTask, requestEdit, saveTaskText, saveTaskMemo, openEditModal, deleteTask, addChild, onRowPointerDown,
   }
@@ -923,7 +1011,7 @@ export default function Home() {
                   defaultValue=""
                   onKeyDown={e => { if (e.key === "Enter") handleAddMainTask() }}
                 />
-                <button className={`add-btn add-btn-${accentCls}`} style={{ flexShrink: 0 }} onClick={handleAddMainTask}>+</button>
+                <button className={`add-btn add-btn-${accentCls}`} style={{ flexShrink: 0, opacity: submitting ? 0.5 : 1, cursor: submitting ? "not-allowed" : "pointer" }} onClick={handleAddMainTask} disabled={submitting}>+</button>
               </div>
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
                 <select value={taskPriority} onChange={e => setTaskPriority(e.target.value as Priority)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "6px 6px", fontSize: "12px", outline: "none" }}>
@@ -1004,7 +1092,7 @@ export default function Home() {
               <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "8px" }}>
                 <input style={{ flex: 1, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "14px", outline: "none" }} placeholder="新しい目標を追加..." value={goalText} onChange={e => setGoalText(e.target.value)} onKeyDown={e => e.key === "Enter" && addGoal()} />
                 <input type="date" value={goalDue} onChange={e => setGoalDue(e.target.value)} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px", fontSize: "13px", outline: "none" }} />
-                <button className={`add-btn add-btn-${accentCls}`} onClick={addGoal}>+</button>
+                <button className={`add-btn add-btn-${accentCls}`} style={{ opacity: submitting ? 0.5 : 1, cursor: submitting ? "not-allowed" : "pointer" }} onClick={addGoal} disabled={submitting}>+</button>
               </div>
               <div className="list-body">
                 {loading ? <div className="empty-msg">読み込み中...</div>
