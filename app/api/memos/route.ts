@@ -19,11 +19,14 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { title, content, mode } = await req.json()
-    const memo = await db.insert("memos", {
+    const { title, content, mode, tags } = await req.json()
+    const insert: Record<string, unknown> = {
       id: uid(), user_id: USER_ID, mode: mode || "work",
       title: title || "", content: content || "",
-    })
+    }
+    // tags は指定時のみ送る（列未追加の環境で作成を壊さない）
+    if (tags) insert.tags = tags
+    const memo = await db.insert("memos", insert)
     return NextResponse.json(memo, { status: 201 })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

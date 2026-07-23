@@ -3,10 +3,12 @@ import { db } from "@/lib/db"
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
-    const { title, content } = await req.json()
-    const memo = await db.update("memos", params.id, {
-      title, content, updated_at: new Date().toISOString()
-    })
+    const body = await req.json()
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (typeof body.title === "string") updates.title = body.title
+    if (typeof body.content === "string") updates.content = body.content
+    if (typeof body.tags === "string") updates.tags = body.tags
+    const memo = await db.update("memos", params.id, updates)
     return NextResponse.json(memo)
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

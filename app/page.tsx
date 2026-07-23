@@ -36,7 +36,14 @@ interface Memo {
   id: string
   title: string
   content: string
+  tags: string   // カンマ区切り "仕事,アイデア"
   updated_at: string
+}
+
+// "a, b ,c" → ["a","b","c"]
+function parseTags(s: string | null | undefined): string[] {
+  if (!s) return []
+  return s.split(",").map(t => t.trim()).filter(Boolean)
 }
 
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"]
@@ -478,6 +485,11 @@ export default function Home() {
   const [memoModal, setMemoModal] = useState<{ open: boolean; editing: boolean; id: string | null }>({ open: false, editing: false, id: null })
   const [memoTitle, setMemoTitle] = useState("")
   const [memoContent, setMemoContent] = useState("")
+  const [memoTags, setMemoTags] = useState("")
+
+  // メモ検索・タグ絞り込み
+  const [memoSearch, setMemoSearch] = useState("")
+  const [memoTagFilter, setMemoTagFilter] = useState<string | null>(null)
 
   // Drag & drop reorder
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -654,23 +666,30 @@ export default function Home() {
   // ---- Memo actions ----
   function openMemo(m: Memo) {
     setMemoModal({ open: true, editing: false, id: m.id })
-    setMemoTitle(m.title); setMemoContent(m.content)
+    setMemoTitle(m.title); setMemoContent(m.content); setMemoTags(m.tags || "")
   }
 
   function newMemo() {
     setMemoModal({ open: true, editing: true, id: null })
-    setMemoTitle(""); setMemoContent("")
+    setMemoTitle(""); setMemoContent(""); setMemoTags("")
   }
 
   async function saveMemo() {
+    // 入力された "a, b" を正規化して保存
+    const normalizedTags = parseTags(memoTags).join(",")
+    const payload = { title: memoTitle, content: memoContent, tags: normalizedTags }
     if (memoModal.id) {
-      await fetch(`/api/memos/${memoModal.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: memoTitle, content: memoContent }) })
-      setMemos(prev => prev.map(m => m.id === memoModal.id ? { ...m, title: memoTitle, content: memoContent } : m))
+      const res = await fetch(`/api/memos/${memoModal.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      if (!res.ok) { alert("メモの保存に失敗しました"); return }
+      setMemos(prev => prev.map(m => m.id === memoModal.id ? { ...m, ...payload } : m))
+      setMemoTags(normalizedTags)
       setMemoModal(prev => ({ ...prev, editing: false }))
     } else {
-      const res = await fetch("/api/memos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: memoTitle, content: memoContent, mode }) })
+      const res = await fetch("/api/memos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, mode }) })
       const memo: Memo = await res.json()
+      if (!res.ok || !memo?.id) { alert("メモの作成に失敗しました"); return }
       setMemos(prev => [memo, ...prev])
+      setMemoTags(normalizedTags)
       setMemoModal({ open: true, editing: false, id: memo.id })
     }
   }
@@ -710,6 +729,19 @@ export default function Home() {
   const doneCnt = tasks.filter(t => isTaskDone(t) && !t.parent_id).length
   const overdueCnt = tasks.filter(t => !isTaskDone(t) && !t.is_recurring && isOverdue(t.due_date)).length
   const avgGoal = goals.length ? Math.round(goals.reduce((a, g) => a + g.pct, 0) / goals.length) : 0
+
+  // メモ：タグ一覧と検索/タグ絞り込み（タイトル・本文・タグを対象）
+  const allMemoTags = Array.from(new Set(memos.flatMap(m => parseTags(m.tags)))).sort()
+  const memoQuery = memoSearch.trim().toLowerCase()
+  const filteredMemos = memos.filter(m => {
+    if (memoTagFilter && !parseTags(m.tags).includes(memoTagFilter)) return false
+    if (!memoQuery) return true
+    return (
+      (m.title || "").toLowerCase().includes(memoQuery) ||
+      (m.content || "").toLowerCase().includes(memoQuery) ||
+      (m.tags || "").toLowerCase().includes(memoQuery)
+    )
+  })
 
   // ---- Drag & drop (長押し→ドラッグ, タッチ対応) ----
   const draggingRef = useRef<string | null>(null)
@@ -962,18 +994,55 @@ export default function Home() {
               <div className="card-title"><span>📝</span> メモ一覧</div>
               <button onClick={newMemo} className={`add-btn add-btn-${accentCls}`} style={{ fontSize: "14px", padding: "6px 12px" }}>+ 新規</button>
             </div>
+            {/* 検索 */}
+            <div style={{ padding: "10px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "6px", alignItems: "center" }}>
+              <input
+                value={memoSearch}
+                onChange={e => setMemoSearch(e.target.value)}
+                placeholder="🔍 タイトル・本文・タグで検索..."
+                style={{ flex: 1, minWidth: 0, border: "1px solid #e5e7eb", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", outline: "none" }}
+              />
+              {(memoSearch || memoTagFilter) && (
+                <button onClick={() => { setMemoSearch(""); setMemoTagFilter(null) }}
+                  style={{ padding: "6px 10px", borderRadius: "8px", border: "none", background: "#f3f4f6", color: "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>クリア</button>
+              )}
+            </div>
+
+            {/* タグ絞り込み */}
+            {allMemoTags.length > 0 && (
+              <div style={{ padding: "8px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: "11px", color: "#6b7280", flexShrink: 0 }}>🏷 タグ:</span>
+                {allMemoTags.map(t => (
+                  <button key={t} onClick={() => setMemoTagFilter(memoTagFilter === t ? null : t)}
+                    style={{
+                      padding: "3px 10px", borderRadius: "999px", border: "none", cursor: "pointer", fontSize: "11px", fontWeight: 600,
+                      background: memoTagFilter === t ? accentColor : "#f3f4f6",
+                      color: memoTagFilter === t ? "white" : "#374151",
+                    }}>{t}</button>
+                ))}
+              </div>
+            )}
+
             <div className="list-body">
               {loading ? <div className="empty-msg">読み込み中...</div>
                 : memos.length === 0 ? <div className="empty-msg">メモがありません</div>
-                : memos.map(m => (
+                : filteredMemos.length === 0 ? <div className="empty-msg">該当するメモがありません</div>
+                : filteredMemos.map(m => (
                   <div key={m.id} onClick={() => openMemo(m)}
                     style={{ padding: "12px 20px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", transition: "background .1s" }}
                     onMouseEnter={e => (e.currentTarget.style.background = "#f9fafb")}
                     onMouseLeave={e => (e.currentTarget.style.background = "white")}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ fontWeight: 600, fontSize: "14px" }}>{m.title || "（無題）"}</div>
-                      <button className="del-btn" onClick={e => { e.stopPropagation(); deleteMemo(m.id) }}>×</button>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                      <div style={{ fontWeight: 600, fontSize: "14px", minWidth: 0, overflowWrap: "anywhere" }}>{m.title || "（無題）"}</div>
+                      <button className="del-btn" style={{ flexShrink: 0 }} onClick={e => { e.stopPropagation(); deleteMemo(m.id) }}>×</button>
                     </div>
+                    {parseTags(m.tags).length > 0 && (
+                      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "5px" }}>
+                        {parseTags(m.tags).map(t => (
+                          <span key={t} style={{ fontSize: "10px", fontWeight: 600, color: accentColor, background: "#f3f4f6", borderRadius: "999px", padding: "1px 8px" }}>{t}</span>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.content}</div>
                   </div>
                 ))}
@@ -1086,12 +1155,32 @@ export default function Home() {
             {memoModal.editing ? (
               <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "10px", overflow: "auto" }}>
                 <input value={memoTitle} onChange={e => setMemoTitle(e.target.value)} placeholder="タイトル" style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 12px", fontSize: "15px", fontWeight: 600, outline: "none" }} />
+                <div>
+                  <input value={memoTags} onChange={e => setMemoTags(e.target.value)} placeholder="🏷 タグ（カンマ区切り 例: 仕事, アイデア）" style={{ width: "100%", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "7px 12px", fontSize: "13px", outline: "none" }} />
+                  {allMemoTags.length > 0 && (
+                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "6px", alignItems: "center" }}>
+                      <span style={{ fontSize: "10px", color: "#9ca3af" }}>既存:</span>
+                      {allMemoTags.map(t => (
+                        <button key={t} type="button"
+                          onClick={() => { const cur = parseTags(memoTags); if (!cur.includes(t)) setMemoTags([...cur, t].join(", ")) }}
+                          style={{ fontSize: "10px", fontWeight: 600, color: "#374151", background: "#f3f4f6", border: "none", borderRadius: "999px", padding: "2px 8px", cursor: "pointer" }}>+ {t}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <textarea value={memoContent} onChange={e => setMemoContent(e.target.value)} placeholder="メモを入力...（URLはリンクになります）" style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "10px 12px", fontSize: "14px", outline: "none", minHeight: "240px", resize: "vertical", lineHeight: "1.6" }} />
               </div>
             ) : (
               <div style={{ padding: "16px 20px", overflow: "auto" }}>
-                <div style={{ fontWeight: 700, fontSize: "18px", marginBottom: "10px" }}>{memoTitle || "（無題）"}</div>
-                <div style={{ fontSize: "14px", color: "#374151", whiteSpace: "pre-wrap", lineHeight: "1.7" }}>{renderWithLinks(memoContent) || <span style={{ color: "#9ca3af" }}>（内容なし）</span>}</div>
+                <div style={{ fontWeight: 700, fontSize: "18px", marginBottom: "8px", overflowWrap: "anywhere" }}>{memoTitle || "（無題）"}</div>
+                {parseTags(memoTags).length > 0 && (
+                  <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginBottom: "10px" }}>
+                    {parseTags(memoTags).map(t => (
+                      <span key={t} style={{ fontSize: "11px", fontWeight: 600, color: accentColor, background: "#f3f4f6", borderRadius: "999px", padding: "2px 9px" }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+                <div style={{ fontSize: "14px", color: "#374151", whiteSpace: "pre-wrap", lineHeight: "1.7", overflowWrap: "anywhere" }}>{renderWithLinks(memoContent) || <span style={{ color: "#9ca3af" }}>（内容なし）</span>}</div>
               </div>
             )}
 
