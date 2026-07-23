@@ -293,22 +293,25 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
         onPointerDown={level === 0 && ctx.dragEnabled ? (e) => ctx.onRowPointerDown(e, task.id) : undefined}
       >
         {level === 0 && ctx.dragEnabled && (
-          <span title="長押しで並び替え" style={{ cursor: "grab", color: "#cbd5e1", fontSize: "14px", flexShrink: 0, userSelect: "none", lineHeight: 1, touchAction: "none" }}>⠿</span>
+          <span aria-hidden="true" title="長押しで並び替え" style={{ cursor: "grab", color: "#cbd5e1", fontSize: "14px", flexShrink: 0, userSelect: "none", lineHeight: 1, touchAction: "none" }}>⠿</span>
         )}
 
         {/* 折りたたみ / ツリー記号 */}
         {hasChildren ? (
           <button onClick={() => ctx.toggleCollapse(task.id)} title={collapsed ? "展開" : "折りたたみ"}
+            aria-label={collapsed ? "サブタスクを展開" : "サブタスクを折りたたむ"} aria-expanded={!collapsed}
             style={{ border: "none", background: "none", cursor: "pointer", color: "#9ca3af", fontSize: "10px", width: "14px", flexShrink: 0, padding: 0, lineHeight: 1 }}>
             {collapsed ? "▶" : "▼"}
           </button>
         ) : isChild ? (
-          <span style={{ color: "#d1d5db", fontSize: "12px", flexShrink: 0, width: "10px", textAlign: "center" }}>↳</span>
+          <span aria-hidden="true" style={{ color: "#d1d5db", fontSize: "12px", flexShrink: 0, width: "10px", textAlign: "center" }}>↳</span>
         ) : null}
 
         <div className={`task-check ${done ? "task-check-done" : ""}`}
+          role="checkbox" aria-checked={done} aria-label={`${task.text} を${done ? "未完了に戻す" : "完了にする"}`} tabIndex={0}
           style={isChild ? { width: "16px", height: "16px", fontSize: "10px" } : undefined}
-          onClick={() => ctx.toggleTask(task.id, task)}>
+          onClick={() => ctx.toggleTask(task.id, task)}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ctx.toggleTask(task.id, task) } }}>
           {done ? "✓" : ""}
         </div>
 
@@ -360,12 +363,12 @@ function TaskItem({ task, level, ctx }: { task: Task; level: number; ctx: TaskCt
 
         {/* アクション群（右端に固定） */}
         <div style={{ display: "flex", alignItems: "center", gap: "1px", flexShrink: 0 }}>
-          <button onClick={() => ctx.openEditModal(task)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 2px", color: "#6b7280" }} title="編集">✏️</button>
-          <button onClick={() => ctx.setExpandedMemoId(isMemoOpen ? null : task.id)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "14px", padding: "2px 2px", opacity: task.memo ? 1 : 0.4 }} title="メモ">📝</button>
+          <button onClick={() => ctx.openEditModal(task)} aria-label={`${task.text} を編集`} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 2px", color: "#6b7280" }} title="編集">✏️</button>
+          <button onClick={() => ctx.setExpandedMemoId(isMemoOpen ? null : task.id)} aria-label={`${task.text} のメモ`} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "14px", padding: "2px 2px", opacity: task.memo ? 1 : 0.4 }} title="メモ">📝</button>
           {level < 2 && (
-            <button onClick={() => ctx.setAddingChildTo(task.id)} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "15px", padding: "2px 2px" }} title="サブタスクを追加">＋</button>
+            <button onClick={() => ctx.setAddingChildTo(task.id)} aria-label={`${task.text} にサブタスクを追加`} style={{ border: "none", background: "none", cursor: "pointer", color: "#6b7280", fontSize: "15px", padding: "2px 2px" }} title="サブタスクを追加">＋</button>
           )}
-          <button className="del-btn" onClick={() => ctx.deleteTask(task.id)}>×</button>
+          <button className="del-btn" onClick={() => ctx.deleteTask(task.id)} aria-label={`${task.text} を削除`} title="削除">×</button>
         </div>
       </div>
 
@@ -453,7 +456,7 @@ export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
   const [memos, setMemos] = useState<Memo[]>([])
-  const [highlights, setHighlights] = useState<{ year: string; month: string }>({ year: "", month: "" })
+  const [yearGoal, setYearGoal] = useState("")
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>("active")
   const [sortMode, setSortMode] = useState<"manual" | "auto">("auto")
@@ -534,12 +537,12 @@ export default function Home() {
       setTasks(Array.isArray(t) ? t : [])
       setGoals(Array.isArray(g) ? g : [])
       setMemos(Array.isArray(m) ? m : [])
-      setHighlights({ year: h?.year || "", month: h?.month || "" })
+      setYearGoal(h?.year || "")
     } catch (e) {
       console.error(e)
       // 失敗時に前モードのデータが残らないようクリアし、エラーを通知（#4）
       setTasks([]); setGoals([]); setMemos([])
-      setHighlights({ year: "", month: "" })
+      setYearGoal("")
       notify("読み込みに失敗しました")
     }
     finally { setLoading(false) }
@@ -558,14 +561,28 @@ export default function Home() {
     }
   }, [notify, fetchAll])
 
-  // 並び順の選択を記憶（リロード後も保持。モード共通）
+  // 表示設定（並び順・フィルタ・折りたたみ）を記憶し、リロード後も保持する（#14）
+  const prefsLoaded = useRef(false)
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? localStorage.getItem("taskSortMode") : null
-    if (saved === "manual" || saved === "auto") setSortMode(saved)
+    if (typeof window === "undefined") return
+    const savedSort = localStorage.getItem("taskSortMode")
+    if (savedSort === "manual" || savedSort === "auto") setSortMode(savedSort)
+    const savedFilter = localStorage.getItem("taskFilter")
+    if (savedFilter === "active" || savedFilter === "done") setFilter(savedFilter)
+    try {
+      const savedCollapsed = JSON.parse(localStorage.getItem("collapsedTaskIds") || "[]")
+      if (Array.isArray(savedCollapsed)) setCollapsedIds(new Set(savedCollapsed))
+    } catch { /* 壊れた値は無視 */ }
+    prefsLoaded.current = true
   }, [])
+
   useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("taskSortMode", sortMode)
-  }, [sortMode])
+    // 読み込み前に初期値で上書きしないようガード
+    if (!prefsLoaded.current || typeof window === "undefined") return
+    localStorage.setItem("taskSortMode", sortMode)
+    localStorage.setItem("taskFilter", filter)
+    localStorage.setItem("collapsedTaskIds", JSON.stringify(Array.from(collapsedIds)))
+  }, [sortMode, filter, collapsedIds])
 
   // ---- Task actions ----
   async function addTask(text: string, parentId: string | null = null, priority: Priority = "mid", start = "", due = "") {
@@ -719,9 +736,9 @@ export default function Home() {
   }
 
   // ---- Highlights ----
-  async function saveHighlight(kind: "year" | "month", text: string) {
-    setHighlights(prev => ({ ...prev, [kind]: text }))
-    await apiMutate("/api/highlights", { method: "PATCH", body: JSON.stringify({ mode, [`${kind}_text`]: text }) }, "目標の保存に失敗しました")
+  async function saveYearGoal(text: string) {
+    setYearGoal(text)
+    await apiMutate("/api/highlights", { method: "PATCH", body: JSON.stringify({ mode, year_text: text }) }, "目標の保存に失敗しました")
   }
 
   // ---- Memo actions ----
@@ -1086,7 +1103,7 @@ export default function Home() {
         {tab === "goals" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             {/* 今年の目標 */}
-            <HighlightBanner icon="🎯" label="今年の目標" value={highlights.year} accentColor={accentColor} onSave={(v) => saveHighlight("year", v)} />
+            <HighlightBanner icon="🎯" label="今年の目標" value={yearGoal} accentColor={accentColor} onSave={saveYearGoal} />
 
             <div className="card">
               <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", gap: "8px" }}>
@@ -1102,8 +1119,8 @@ export default function Home() {
                       <div className="goal-top">
                         <div className={`goal-name ${g.pct >= 100 ? "goal-name-done" : ""}`}>{g.text}</div>
                         <div className={`goal-pct goal-pct-${accentCls}`}>{g.pct}%</div>
-                        <button onClick={() => openGoalEdit(g)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px", color: "#6b7280" }} title="編集">✏️</button>
-                        <button className="del-btn" onClick={() => deleteGoal(g.id)}>×</button>
+                        <button onClick={() => openGoalEdit(g)} aria-label={`${g.text} を編集`} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "13px", padding: "2px 3px", color: "#6b7280" }} title="編集">✏️</button>
+                        <button className="del-btn" onClick={() => deleteGoal(g.id)} aria-label={`${g.text} を削除`} title="削除">×</button>
                       </div>
                       <div className="progress-bar"><div className={`progress-fill progress-${accentCls}`} style={{ width: `${g.pct}%` }} /></div>
                       <div className="goal-controls">
@@ -1164,7 +1181,7 @@ export default function Home() {
                     onMouseLeave={e => (e.currentTarget.style.background = "white")}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                       <div style={{ fontWeight: 600, fontSize: "14px", minWidth: 0, overflowWrap: "anywhere" }}>{m.title || "（無題）"}</div>
-                      <button className="del-btn" style={{ flexShrink: 0 }} onClick={e => { e.stopPropagation(); deleteMemo(m.id) }}>×</button>
+                      <button className="del-btn" style={{ flexShrink: 0 }} onClick={e => { e.stopPropagation(); deleteMemo(m.id) }} aria-label={`${m.title || "無題のメモ"} を削除`} title="削除">×</button>
                     </div>
                     {parseTags(m.tags).length > 0 && (
                       <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "5px" }}>
@@ -1187,7 +1204,7 @@ export default function Home() {
           <div style={{ background: "white", borderRadius: "16px", width: "100%", maxWidth: "480px", overflow: "auto", maxHeight: "90vh" }}>
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontWeight: 700, fontSize: "16px" }}>✏️ タスクを編集</div>
-              <button onClick={() => setEditModal(null)} style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
+              <button onClick={() => setEditModal(null)} aria-label="閉じる" title="閉じる" style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
             </div>
             <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
               <div>
@@ -1249,7 +1266,7 @@ export default function Home() {
           <div style={{ background: "white", borderRadius: "16px", width: "100%", maxWidth: "440px", overflow: "hidden" }}>
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontWeight: 700, fontSize: "16px" }}>🎯 目標を編集</div>
-              <button onClick={() => setEditGoalModal(null)} style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
+              <button onClick={() => setEditGoalModal(null)} aria-label="閉じる" title="閉じる" style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
             </div>
             <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
               <div>
@@ -1279,7 +1296,7 @@ export default function Home() {
           <div style={{ background: "white", borderRadius: "16px", width: "100%", maxWidth: "560px", display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
             <div style={{ padding: "14px 20px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontWeight: 700, fontSize: "16px" }}>{memoModal.editing ? (memoModal.id ? "✏️ メモを編集" : "📝 新規メモ") : "📝 メモ"}</div>
-              <button onClick={() => setMemoModal({ open: false, editing: false, id: null })} style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
+              <button onClick={() => setMemoModal({ open: false, editing: false, id: null })} aria-label="閉じる" title="閉じる" style={{ border: "none", background: "none", fontSize: "22px", cursor: "pointer", color: "#6b7280" }}>×</button>
             </div>
 
             {memoModal.editing ? (

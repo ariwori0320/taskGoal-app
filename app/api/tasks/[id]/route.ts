@@ -8,7 +8,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (typeof body.done === "boolean") updates.done = body.done
     if (typeof body.text === "string") updates.text = body.text
     if (typeof body.memo === "string") updates.memo = body.memo
-    if (typeof body.mode === "string") updates.mode = body.mode
     if (typeof body.priority === "string") updates.priority = body.priority
     if ("start_date" in body) updates.start_date = body.start_date || null
     if ("due_date" in body) updates.due_date = body.due_date || null

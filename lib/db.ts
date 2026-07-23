@@ -10,12 +10,25 @@ function getHeaders() {
   }
 }
 
+// 1リクエストで取得する最大件数（際限なく取得しないための上限）
+const DEFAULT_LIMIT = 500
+
 export const db = {
-  async select(table: string, filters: Record<string, string>) {
+  /**
+   * @param opts.order 並び順。既定は "created_at.desc"。
+   *                   created_at 列を持たないテーブルでは明示的に指定すること。
+   * @param opts.limit 取得件数の上限。既定は DEFAULT_LIMIT。
+   */
+  async select(
+    table: string,
+    filters: Record<string, string>,
+    opts?: { order?: string; limit?: number }
+  ) {
     const params = new URLSearchParams(
       Object.entries(filters).map(([k, v]) => [k, `eq.${v}`])
     )
-    params.set("order", "created_at.desc")
+    params.set("order", opts?.order ?? "created_at.desc")
+    params.set("limit", String(opts?.limit ?? DEFAULT_LIMIT))
     const res = await fetch(`${SUPABASE_URL}/${table}?${params}`, {
       headers: getHeaders(),
       cache: "no-store",

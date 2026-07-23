@@ -41,30 +41,6 @@ body {
 
 .logo { font-size: 18px; font-weight: 700; }
 
-.header-right { display: flex; align-items: center; gap: 16px; }
-
-.user-area { display: flex; align-items: center; gap: 8px; }
-
-.user-avatar {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.user-name { font-size: 13px; font-weight: 600; color: var(--gray-700); }
-
-.signout-btn {
-  background: none;
-  border: 1px solid var(--gray-200);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--gray-500);
-  transition: all .15s;
-}
-.signout-btn:hover { border-color: var(--gray-300); color: var(--gray-700); }
-
 /* Mode toggle */
 .mode-toggle {
   display: flex;
@@ -102,7 +78,6 @@ body {
 @media (max-width: 720px) {
   .container { grid-template-columns: 1fr; padding: 16px; }
   .mode-btn { padding: 6px 10px; font-size: 12px; }
-  .user-name { display: none; }
   .header { padding: 0 12px; height: 52px; }
   .stats { padding: 12px 16px; }
   .stat-num { font-size: 22px; }
@@ -111,7 +86,6 @@ body {
   .task-item { padding: 10px 12px; }
   .goal-item { padding: 12px 14px; }
   .filter-tabs { padding: 8px 14px 0; }
-  .memo-grid { grid-template-columns: 1fr; gap: 12px; }
 }
 
 /* Stats */
@@ -150,9 +124,6 @@ body {
 }
 
 .card-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-
-/* Memo tab grid */
-.memo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .badge-work    { background: var(--work-light);    color: var(--work-primary); }
@@ -364,47 +335,6 @@ body {
 .goal-controls { display: flex; align-items: center; gap: 8px; }
 .goal-controls input[type="range"] { flex: 1; cursor: pointer; }
 .goal-due { font-size: 11px; color: var(--gray-500); white-space: nowrap; }
-
-/* Login page */
-.login-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
-}
-
-.login-card {
-  background: white;
-  border-radius: 20px;
-  padding: 48px 40px;
-  text-align: center;
-  box-shadow: 0 8px 40px rgba(0,0,0,.1);
-  max-width: 360px;
-  width: 90%;
-}
-
-.login-logo { font-size: 48px; margin-bottom: 12px; }
-.login-title { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
-.login-sub { font-size: 14px; color: var(--gray-500); margin-bottom: 32px; }
-
-.github-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  background: #24292f;
-  color: white;
-  border: none;
-  border-radius: 10px;
-  padding: 14px 28px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity .15s;
-  width: 100%;
-  justify-content: center;
-}
-.github-btn:hover { opacity: .88; }
 
 /* Loading */
 .loading {
