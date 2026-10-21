@@ -1,0 +1,194 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MyFlow Tasks API (for ChatGPT)",
+    "description": "MyFlow のタスクを ChatGPT から操作するための API。取得・追加・完了は即時、変更・削除は confirm=true のときのみ実行する。",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://REPLACE-ME.vercel.app", "description": "本番(Vercel)の実URLに置き換えてください" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/api/gpt/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "summary": "タスク一覧を取得する",
+        "description": "未完了/完了やキーワードで絞り込める。変更・削除の前に対象を特定する目的でも使う。",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "work=仕事 / private=プライベート。省略時は両方。",
+            "schema": { "type": "string", "enum": ["work", "private"] }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "active=未完了(既定) / done=完了 / all=すべて",
+            "schema": { "type": "string", "enum": ["active", "done", "all"], "default": "active" }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "タスク名の部分一致（大文字小文字無視）",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "タスク一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addTask",
+        "summary": "タスクを追加する（即時・確認不要）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                  "text": { "type": "string", "description": "タスク名（必須）" },
+                  "mode": { "type": "string", "enum": ["work", "private"], "description": "既定は work" },
+                  "priority": { "type": "string", "enum": ["high", "mid", "low"], "description": "既定は mid" },
+                  "start_date": { "type": "string", "description": "開始日 YYYY-MM-DD" },
+                  "due_date": { "type": "string", "description": "期限日 YYYY-MM-DD" },
+                  "is_recurring": { "type": "boolean", "description": "繰り返しタスクか" },
+                  "recurring_days": { "type": "string", "description": "繰り返す曜日。空=毎日、\"1,3,5\"=月水金 (0=日..6=土)" },
+                  "parent_id": { "type": "string", "description": "親タスクID（サブタスクにする場合）" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "作成されたタスク",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "task": { "$ref": "#/components/schemas/Task" } } } } }
+          }
+        }
+      }
+    },
+    "/api/gpt/tasks/complete": {
+      "post": {
+        "operationId": "completeTask",
+        "summary": "タスクを完了にする / 未完了に戻す（即時）",
+        "x-openai-isConsequential": false,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": { "type": "string", "description": "対象タスクのID" },
+                  "done": { "type": "boolean", "description": "true=完了(既定) / false=未完了に戻す" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "更新後のタスク", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "task": { "$ref": "#/components/schemas/Task" } } } } } } }
+      }
+    },
+    "/api/gpt/tasks/update": {
+      "post": {
+        "operationId": "updateTask",
+        "summary": "タスク内容を変更する（要確認）",
+        "description": "confirm を付けずに呼ぶと needsConfirmation=true とプレビューが返る。ユーザーの同意後に confirm:true を付けて再送する。",
+        "x-openai-isConsequential": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": { "type": "string", "description": "対象タスクのID" },
+                  "confirm": { "type": "boolean", "description": "true のときのみ実際に変更する" },
+                  "text": { "type": "string" },
+                  "priority": { "type": "string", "enum": ["high", "mid", "low"] },
+                  "start_date": { "type": "string", "description": "YYYY-MM-DD（空文字でクリア）" },
+                  "due_date": { "type": "string", "description": "YYYY-MM-DD（空文字でクリア）" },
+                  "memo": { "type": "string" },
+                  "mode": { "type": "string", "enum": ["work", "private"] },
+                  "is_recurring": { "type": "boolean" },
+                  "recurring_days": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "確認要求、または更新後のタスク" } }
+      }
+    },
+    "/api/gpt/tasks/delete": {
+      "post": {
+        "operationId": "deleteTask",
+        "summary": "タスクを削除する（要確認）",
+        "description": "confirm を付けずに呼ぶと needsConfirmation=true と削除対象が返る。ユーザーの同意後に confirm:true を付けて再送する。",
+        "x-openai-isConsequential": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": { "type": "string", "description": "対象タスクのID" },
+                  "confirm": { "type": "boolean", "description": "true のときのみ実際に削除する" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "確認要求、または削除結果" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "mode": { "type": "string" },
+          "priority": { "type": "string" },
+          "completed": { "type": "boolean" },
+          "start_date": { "type": ["string", "null"] },
+          "due_date": { "type": ["string", "null"] },
+          "is_recurring": { "type": "boolean" },
+          "recurring_days": { "type": "string" },
+          "parent_id": { "type": ["string", "null"] },
+          "memo": { "type": ["string", "null"] },
+          "created_at": { "type": "string" }
+        }
+      }
+    }
+  }
+}
