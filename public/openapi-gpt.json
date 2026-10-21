@@ -6,7 +6,7 @@
     "version": "1.0.0"
   },
   "servers": [
-    { "url": "https://REPLACE-ME.vercel.app", "description": "本番(Vercel)の実URLに置き換えてください" }
+    { "url": "https://task-goal-app-qlr7.vercel.app", "description": "本番(Vercel)" }
   ],
   "security": [{ "bearerAuth": [] }],
   "paths": {
