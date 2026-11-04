@@ -167,3 +167,33 @@ test("taskPlanSummary: 見積りに対する配置済み・実施済み・未配
   assert.equal(taskPlanSummary(null, [{ status: "planned", planned_minutes: 30 }]).unplacedMinutes, null)
   assert.equal(taskPlanSummary(30, [{ status: "planned", planned_minutes: 60 }]).unplacedMinutes, 0)
 })
+
+// ---------- 勤務時間のように「同じカテゴリの作業を入れてよい」固定予定 ----------
+
+test("作業を入れてよい固定予定(勤務時間): 同じカテゴリの作業は差し引かず、別カテゴリには差し引く", () => {
+  const NOON = { window_start: 12 * 60, window_end: 17 * 60 } // 300分
+  const work = fx({ event_id: "w", mode: "work", title: "仕事", start_min: 570, end_min: 1110, allows_tasks: true })
+  // 仕事のタスクは、仕事の勤務時間の中に入れても「時間が取れません」にならない
+  const own = analyzeDay({ date: "2026-11-05", currentMode: "work", fixed: [work], bufferMinutes: 0, timeboxes: [tb({ id: "a", mode: "work", planned_minutes: 60, ...NOON })] })
+  assert.deepEqual(own.warnings, [])
+  assert.equal(own.windows[0].freeMinutes, 300)
+  // プライベートの作業を勤務時間の中に入れると、時間が取れない（別カテゴリの勤務時間は差し引く）
+  const other = analyzeDay({ date: "2026-11-05", currentMode: "private", fixed: [work], bufferMinutes: 0, timeboxes: [tb({ id: "p", mode: "private", planned_minutes: 60, ...NOON })] })
+  assert.equal(other.warnings[0].code, "window_blocked")
+  // 「作業を入れてよい」を付けない固定予定(会議など)は、同じカテゴリの作業からも差し引く
+  const meeting = fx({ event_id: "m", mode: "work", title: "会議", start_min: 12 * 60, end_min: 17 * 60 })
+  const blocked = analyzeDay({ date: "2026-11-05", currentMode: "work", fixed: [meeting], bufferMinutes: 0, timeboxes: [tb({ id: "a", mode: "work", planned_minutes: 60, ...NOON })] })
+  assert.equal(blocked.warnings[0].code, "window_blocked")
+})
+
+test("勤務時間の中の同じカテゴリの会議は『重なり』として警告しない。別カテゴリとの重なりは警告する", () => {
+  const block = fx({ event_id: "w", mode: "work", title: "仕事", start_min: 570, end_min: 1110, allows_tasks: true })
+  const meeting = fx({ event_id: "m", mode: "work", title: "定例会議", start_min: 600, end_min: 660 })
+  const inside = analyzeDay({ date: "2026-11-05", currentMode: "work", fixed: [block, meeting], timeboxes: [], bufferMinutes: 0 })
+  assert.deepEqual(inside.warnings, [])
+  const gym = fx({ event_id: "g", mode: "private", title: "ジム", start_min: 1080, end_min: 1170 }) // 18:00-19:30 と勤務(〜18:30)が30分重なる
+  const cross = analyzeDay({ date: "2026-11-05", currentMode: "private", fixed: [block, gym], timeboxes: [], bufferMinutes: 0 })
+  assert.equal(cross.warnings[0].code, "fixed_overlap")
+  assert.equal(cross.warnings[0].crossCategory, true)
+  assert.equal(cross.warnings[0].overMinutes, 30)
+})

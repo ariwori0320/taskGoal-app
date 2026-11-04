@@ -459,3 +459,22 @@ test("監査: 履歴には操作者(ui / ai:名前)が残る", async () => {
   assert.ok(actors.includes("task_created:ai:claude"))
   assert.ok(actors.includes("task_completed:ui"))
 })
+
+test("固定予定: 『作業を入れてよい枠』は保存でき、勤務時間の中の作業は誤警告にならない／別カテゴリの作業は入れられない", async () => {
+  const d = today()
+  const ev = await SC.createFixedEvent(UI, { mode: "work", title: "仕事", date: d, start_min: 570, end_min: 1110, allows_tasks: true })
+  assert.equal(ev.allows_tasks, true)
+  const meeting = await SC.createFixedEvent(UI, { mode: "work", title: "会議", date: d, start_min: 600, end_min: 660 })
+  assert.equal(meeting.allows_tasks, false, "指定しなければ作業を入れられない予定(既定)")
+  await rejectsWith(SC.createFixedEvent(UI, { mode: "work", title: "x", date: d, start_min: 1, end_min: 2, allows_tasks: "yes" }), 400)
+
+  const w = await mkTask("仕事の作業", "work"), p = await mkTask("私的な作業", "private")
+  const NOON = { window_start: 12 * 60, window_end: 17 * 60 }
+  const okBox = await B.createTimebox(UI, { task_id: w.id, date: d, ...NOON, planned_minutes: 60 })
+  assert.deepEqual(okBox.analysis.warnings, [], "勤務時間の中に仕事の作業を入れても警告は出ない")
+  const bad = await B.createTimebox(UI, { task_id: p.id, date: d, ...NOON, planned_minutes: 60 })
+  assert.equal(bad.analysis.warnings[0].code, "window_blocked", "勤務時間にプライベートの作業は入らない")
+
+  const upd = await SC.updateFixedEvent(UI, ev.id, { allows_tasks: false })
+  assert.equal(upd.allows_tasks, false)
+})

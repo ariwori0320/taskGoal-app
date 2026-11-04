@@ -5,15 +5,15 @@ import {
   badRequest, migrationRequired, requireMode, requireScope, resolveModes,
   type Mode, type Principal,
 } from "../principal"
+import { isTaskDone } from "../task-utils"
 import { nowInTz } from "../time"
 import type { TaskRow, TimeboxDb } from "../types"
 import { cleanText, normDays, optBool, optEstimate, optPriority, optString, optYmd } from "../validate"
 import { loadSettings } from "./settings"
 import { collectDescendants, getGoalRow, getTaskRow, taskDepth } from "./rows"
 
-export function isTaskDone(t: Pick<TaskRow, "is_recurring" | "recurring_done_date" | "done">, today: string): boolean {
-  return t.is_recurring ? t.recurring_done_date === today : !!t.done
-}
+// 完了判定は画面と共通の純粋関数を使う
+export { isTaskDone }
 
 /** AI などへ返す整形（内部の列名・並び順などは出さない） */
 export function shapeTask(t: TaskRow, today: string) {

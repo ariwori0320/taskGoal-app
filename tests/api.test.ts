@@ -143,7 +143,8 @@ test("プランナー: 他カテゴリの予定は時間だけが返り、警告
   await call(R.fixed.POST, "POST", "/api/fixed-events", { mode: "private", title: "ジム", date: d, start_min: 1200, end_min: 1260 })
   const res = await call(R.planner.GET, "GET", `/api/planner?mode=private&from=${d}&to=${d}&includeOther=1`)
   assert.equal(res.json.otherBusy.length, 1)
-  assert.deepEqual(Object.keys(res.json.otherBusy[0]).sort(), ["date", "end", "kind", "start"])
+  // 返るのは「いつ」「作業枠か固定か」だけ。タイトル・タスク・IDは含まない
+  assert.deepEqual(Object.keys(res.json.otherBusy[0]).sort(), ["allows_tasks", "date", "end", "kind", "start"])
   assert.equal(res.json.analysis.private[0].warnings[0].crossCategory, true)
   assert.ok(!JSON.stringify(res.json).includes("機密会議"))
 })

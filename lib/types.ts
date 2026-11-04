@@ -60,6 +60,7 @@ export interface FixedEventDb {
   end_min: number
   repeat_days: string
   until: string | null
+  allows_tasks: boolean
   created_at: string
   updated_at: string
 }

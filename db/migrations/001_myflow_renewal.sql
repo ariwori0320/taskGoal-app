@@ -51,6 +51,7 @@ create table if not exists myflow_fixed_events (
   end_min     integer not null check (end_min between 1 and 1440),
   repeat_days text not null default '',          -- '' = 単発 / '1,2,3,4,5' = 曜日の繰り返し (0=日..6=土)
   until       date,                              -- 繰り返しの終了日（任意）
+  allows_tasks boolean not null default false,   -- true: この時間に同じカテゴリの作業を入れてよい（勤務時間など）
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   check (start_min < end_min),

@@ -8,7 +8,7 @@ import {
 import type { Settings } from "../settings"
 import { diffDays, eachDay, isValidWindow, isYmd, nowInTz } from "../time"
 import type { FixedEventDb, TaskRow, TimeboxDb } from "../types"
-import { cleanText, normDays, optYmd } from "../validate"
+import { cleanText, normDays, optBool, optYmd } from "../validate"
 import { loadSettings } from "./settings"
 import { loadFixedRows } from "./timeboxes"
 import { recordEvent } from "../events"
@@ -26,7 +26,7 @@ export interface ScheduleResult {
   /** カテゴリ別・日別の余白と警告 */
   analysis: Partial<Record<Mode, DayAnalysis[]>>
   /** 画面(UI)のみ: 別カテゴリの予定の「時間だけ」（タイトル・IDは含めない） */
-  otherBusy?: { date: string; kind: "fixed" | "planned"; start: number; end: number; minutes?: number }[]
+  otherBusy?: { date: string; kind: "fixed" | "planned"; start: number; end: number; minutes?: number; allows_tasks?: boolean }[]
   /** マイグレーション未適用で、タイムボックス機能が使えない */
   migrationRequired?: boolean
 }
@@ -99,7 +99,7 @@ export async function getSchedule(p: Principal, q: ScheduleQuery): Promise<Sched
   if (p.kind === "ui" && q.includeOther && modes.length === 1) {
     const others = ALL_MODES.filter(m => m !== modes[0])
     result.otherBusy = [
-      ...occurrences.filter(o => others.includes(o.mode as Mode)).map(o => ({ date: o.date, kind: "fixed" as const, start: o.start_min, end: o.end_min })),
+      ...occurrences.filter(o => others.includes(o.mode as Mode)).map(o => ({ date: o.date, kind: "fixed" as const, start: o.start_min, end: o.end_min, allows_tasks: !!o.allows_tasks })),
       ...boxes.filter(b => others.includes(b.mode as Mode) && b.status === "planned").map(b => ({ date: b.date, kind: "planned" as const, start: b.window_start, end: b.window_end, minutes: b.planned_minutes })),
     ]
   }
@@ -134,6 +134,7 @@ export interface FixedEventInput {
   end_min?: unknown
   repeat_days?: unknown
   until?: unknown
+  allows_tasks?: unknown
 }
 
 export async function createFixedEvent(p: Principal, input: FixedEventInput): Promise<FixedEventDb> {
@@ -151,6 +152,7 @@ export async function createFixedEvent(p: Principal, input: FixedEventInput): Pr
     return (await db.insert("myflow_fixed_events", {
       id: newId("fx_"), user_id: p.userId, mode: input.mode, title,
       date: date ?? null, start_min: input.start_min, end_min: input.end_min, repeat_days: repeat, until: until ?? null,
+      allows_tasks: optBool(input.allows_tasks, "作業を入れてよい枠") ?? false,
     })) as FixedEventDb
   } catch (e) {
     if (isMissingTable(e)) throw migrationRequired()
@@ -170,8 +172,9 @@ export async function updateFixedEvent(p: Principal, id: string, patch: FixedEve
   const repeat = patch.repeat_days !== undefined ? normDays(patch.repeat_days) : cur.repeat_days
   if (!repeat && !date) throw badRequest("単発の固定予定には日付が必要です")
   if (date && until && until < date) throw badRequest("終了日は開始日以降にしてください")
+  const allows = patch.allows_tasks !== undefined ? (optBool(patch.allows_tasks, "作業を入れてよい枠") ?? false) : cur.allows_tasks
   return (await db.update("myflow_fixed_events", id, {
-    title, start_min: start, end_min: end, date, until, repeat_days: repeat, updated_at: new Date().toISOString(),
+    title, start_min: start, end_min: end, date, until, repeat_days: repeat, allows_tasks: allows, updated_at: new Date().toISOString(),
   })) as FixedEventDb
 }
 

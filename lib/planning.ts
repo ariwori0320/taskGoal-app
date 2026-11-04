@@ -54,6 +54,8 @@ export interface FixedEventRow {
   end_min: number
   repeat_days: string          // "" = 単発 / "1,2,3,4,5" = 曜日指定の繰り返し (0=日..6=土)
   until?: string | null        // 繰り返しの終了日
+  /** true: この時間に「同じカテゴリ」の作業を入れてよい（勤務時間など）。別カテゴリの作業からは差し引く。 */
+  allows_tasks?: boolean
 }
 
 export interface FixedOccurrence {
@@ -63,6 +65,7 @@ export interface FixedOccurrence {
   date: string
   start_min: number
   end_min: number
+  allows_tasks?: boolean
 }
 
 export function parseDays(csv: string | null | undefined): number[] {
@@ -84,10 +87,18 @@ export function expandFixedEvents(events: FixedEventRow[], from: string, to: str
   for (const date of eachDay(from, to)) {
     for (const ev of events) {
       if (!occursOn(ev, date)) continue
-      out.push({ event_id: ev.id, mode: ev.mode, title: ev.title, date, start_min: ev.start_min, end_min: ev.end_min })
+      out.push({ event_id: ev.id, mode: ev.mode, title: ev.title, date, start_min: ev.start_min, end_min: ev.end_min, allows_tasks: !!ev.allows_tasks })
     }
   }
   return out
+}
+
+/**
+ * あるカテゴリの作業にとって「使えない時間」。
+ * 勤務時間のように allows_tasks を付けた固定予定は、同じカテゴリの作業には差し引かない。
+ */
+export function busyForMode(fixed: Pick<FixedOccurrence, "mode" | "start_min" | "end_min" | "allows_tasks">[], mode: string): Interval[] {
+  return mergeIntervals(fixed.filter(f => !(f.mode === mode && f.allows_tasks)).map(f => ({ start: f.start_min, end: f.end_min })))
 }
 
 // ---------- タイムボックスと余白 ----------
@@ -149,23 +160,51 @@ export interface AnalyzeInput {
   bufferMinutes?: number
 }
 
+export interface WindowLoadInput {
+  window: Interval
+  /** どのカテゴリから見るか */
+  mode: string
+  /** その日の固定予定(全カテゴリ) */
+  fixed: FixedOccurrence[]
+  /** その日のタイムボックス(全カテゴリ。planned のみが計算対象) */
+  timeboxes: TimeboxRow[]
+  bufferMinutes?: number
+  /** 予定を動かすときに、動かす予定自身を計算から除く */
+  excludeId?: string
+}
+
+/**
+ * ある時間帯 W の「空き」と「そこに確実に入る作業時間」。サーバーの警告と画面の表示が同じ数字になるよう、
+ * 計算はここ1か所にまとめている。
+ *  - free : W から、そのカテゴリの作業が使えない時間（固定予定。勤務時間などは自カテゴリには差し引かない）を除いた長さ
+ *  - own / other : W の中に「必ず収めなければならない」作業時間（余白込み）。
+ *    予定の時間帯が W より広い場合、W の外の空きで吸収できる分は数えない。
+ *  - remain : free - own - other（負なら足りない）
+ */
+export function computeWindowLoad(inp: WindowLoadInput): { free: number; own: number; other: number; remain: number } {
+  const buffer = Math.max(0, inp.bufferMinutes ?? 0)
+  const w = inp.window
+  const active = inp.timeboxes.filter(t => t.status === "planned" && t.id !== inp.excludeId)
+  const forcedInto = (t: TimeboxRow): number => {
+    const tw: Interval = { start: t.window_start, end: t.window_end }
+    if (overlapLength(tw, w) <= 0) return 0
+    const outside = subtractIntervals(subtractIntervals([tw], [w]), busyForMode(inp.fixed, t.mode))
+    return Math.max(0, t.planned_minutes + buffer - totalLength(outside))
+  }
+  const free = totalLength(subtractIntervals([w], busyForMode(inp.fixed, inp.mode)))
+  const own = active.filter(t => t.mode === inp.mode).reduce((s, t) => s + forcedInto(t), 0)
+  const other = active.filter(t => t.mode !== inp.mode).reduce((s, t) => s + forcedInto(t), 0)
+  return { free, own, other, remain: free - own - other }
+}
+
 export function analyzeDay(input: AnalyzeInput): DayAnalysis {
   const { date, currentMode } = input
   const buffer = Math.max(0, input.bufferMinutes ?? 0)
   const active = input.timeboxes.filter(t => t.status === "planned")
   const own = active.filter(t => t.mode === currentMode)
-  const others = active.filter(t => t.mode !== currentMode)
-  const fixedBusy = mergeIntervals(input.fixed.map(f => ({ start: f.start_min, end: f.end_min })))
+  const fixedBusy = busyForMode(input.fixed, currentMode)
   const demand = (t: TimeboxRow) => t.planned_minutes + buffer
   const windowOf = (t: TimeboxRow): Interval => ({ start: t.window_start, end: t.window_end })
-
-  // タイムボックス t の必要時間のうち、時間帯 W の中に必ず収めなければならない分。
-  // t の時間帯のうち W の外にある空き時間で吸収できる分は「必ずしも W に入らない」とみなす。
-  const forcedInto = (t: TimeboxRow, w: Interval): number => {
-    if (overlapLength(windowOf(t), w) <= 0) return 0
-    const outside = subtractIntervals(subtractIntervals([windowOf(t)], [w]), fixedBusy)
-    return Math.max(0, demand(t) - totalLength(outside))
-  }
 
   const warnings: PlanWarning[] = []
   const windows: WindowLoad[] = []
@@ -177,10 +216,9 @@ export function analyzeDay(input: AnalyzeInput): DayAnalysis {
     if (seen.has(key)) continue
     seen.add(key)
     const w = windowOf(t)
-    const free = totalLength(subtractIntervals([w], fixedBusy))
     const group = own.filter(o => o.window_start === t.window_start && o.window_end === t.window_end)
-    const ownMinutes = own.reduce((s, o) => s + forcedInto(o, w), 0)
-    const otherMinutes = others.reduce((s, o) => s + forcedInto(o, w), 0)
+    const load = computeWindowLoad({ window: w, mode: currentMode, fixed: input.fixed, timeboxes: input.timeboxes, bufferMinutes: buffer })
+    const free = load.free, ownMinutes = load.own, otherMinutes = load.other
     const over = Math.max(0, ownMinutes + otherMinutes - free)
     windows.push({
       start: w.start, end: w.end, freeMinutes: free, ownMinutes, otherMinutes,
@@ -219,6 +257,7 @@ export function analyzeDay(input: AnalyzeInput): DayAnalysis {
       const a = fx[i], b = fx[j]
       if (a.event_id === b.event_id) continue
       if (a.mode !== currentMode && b.mode !== currentMode) continue
+      if (a.mode === b.mode && (a.allows_tasks || b.allows_tasks)) continue // 勤務時間の中の会議など
       const ov = overlapLength({ start: a.start_min, end: a.end_min }, { start: b.start_min, end: b.end_min })
       if (ov <= 0) continue
       const cross = a.mode !== b.mode
