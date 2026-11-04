@@ -36,6 +36,28 @@ export function todayIn(tz: string = DEFAULT_TZ, now: Date = new Date()): string
   return nowInTz(tz, now).date
 }
 
+/** 指定タイムゾーンの、その瞬間のUTCとの差（分）。JST なら +540 */
+function tzOffsetMinutes(instant: Date, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(instant)
+  const get = (t: string) => Number(parts.find(p => p.type === t)?.value ?? 0)
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"))
+  return Math.round((asUtc - Math.floor(instant.getTime() / 1000) * 1000) / 60000)
+}
+
+/** 現地の日付の 0:00 にあたる瞬間(UTC)。履歴を「現地の日」で区切って検索するのに使う。 */
+export function localDayStartUtc(date: string, tz: string = DEFAULT_TZ): Date {
+  const p = parseYmd(date)
+  if (!p) throw new Error(`invalid date: ${date}`)
+  const zone = isValidTz(tz) ? tz : DEFAULT_TZ
+  const guess = Date.UTC(p.y, p.m - 1, p.d)
+  let t = guess - tzOffsetMinutes(new Date(guess), zone) * 60000
+  t = guess - tzOffsetMinutes(new Date(t), zone) * 60000 // 夏時間の境目向けにもう一度補正
+  return new Date(t)
+}
+
 // ---- 日付文字列 ----
 
 export function parseYmd(s: unknown): { y: number; m: number; d: number } | null {

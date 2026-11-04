@@ -1,6 +1,6 @@
 // テスト・ローカル確認用の「PostgREST 互換」インメモリDB。本番の Supabase には接続しない。
 // 使い方: import { createMockSupabase } from "./mock-supabase.mjs"
-//         直接実行: node scripts/mock-supabase.mjs [port]
+//         単体起動:  node scripts/mock-supabase-cli.mjs [port]
 
 import http from "node:http"
 
@@ -183,11 +183,4 @@ export function createMockSupabase(opts = {}) {
     close: () => new Promise(resolve => server.close(() => resolve())),
     reset() { for (const t of allowed) store[t].length = 0; log.length = 0 },
   }
-}
-
-// 直接実行時
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}` || process.argv[1]?.endsWith("mock-supabase.mjs")) {
-  const mock = createMockSupabase()
-  const port = await mock.listen(Number(process.argv[2] ?? 54321))
-  console.log(`mock supabase: http://127.0.0.1:${port}/rest/v1`)
 }
