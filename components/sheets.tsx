@@ -107,6 +107,10 @@ function ScheduleSheet({ taskId, boxId, date: d0, window: w0 }: { taskId: string
   const [preview, setPreview] = useState<{ free: number; used: number; remain: number } | null>(null)
 
   const preset = presetForWindow(s.settings, win.start, win.end)
+  // 「カスタム」は、時間帯が既定と一致するかから導かず、選んだ状態として持つ
+  // （夜 19:00–22:00 のように既定と同じ範囲でも、カスタムを選べるように）
+  const [customMode, setCustomMode] = useState(!preset)
+  const isCustom = customMode || !preset
   const winLen = win.end - win.start
   const invalid = !(win.start < win.end) ? "開始は終了より前にしてください" : minutes < 1 ? "作業時間は1分以上にしてください" : minutes > winLen ? `この時間帯(${fmtDuration(winLen)})より長い作業時間は設定できません` : null
 
@@ -161,13 +165,13 @@ function ScheduleSheet({ taskId, boxId, date: d0, window: w0 }: { taskId: string
         <span className="label">時間帯（この間のどこかで）</span>
         <div className="chips">
           {s.settings.presets.map(p => (
-            <button key={p.key} type="button" className="chip" aria-pressed={preset?.key === p.key} onClick={() => setWin({ start: p.start, end: p.end })}>
+            <button key={p.key} type="button" className="chip" aria-pressed={!isCustom && preset?.key === p.key} onClick={() => { setCustomMode(false); setWin({ start: p.start, end: p.end }) }}>
               {p.label} {minutesToHhmm(p.start)}–{minutesToHhmm(p.end)}
             </button>
           ))}
-          <button type="button" className="chip" aria-pressed={!preset} onClick={() => { if (preset) setWin({ start: win.start, end: Math.min(win.end, win.start + 180) || win.end }) }}>カスタム</button>
+          <button type="button" className="chip" aria-pressed={isCustom} onClick={() => setCustomMode(true)}>カスタム</button>
         </div>
-        {!preset && (
+        {isCustom && (
           <div className="field-row" style={{ marginTop: 10 }}>
             <TimeField label="開始" minutes={win.start} onChange={m => setWin(w => ({ ...w, start: m }))} />
             <TimeField label="終了" minutes={win.end} onChange={m => setWin(w => ({ ...w, end: m }))} isEnd />
