@@ -22,3 +22,7 @@ yarn-error.log*
 
 # ts
 *.tsbuildinfo
+
+# playwright
+test-results/
+playwright-report/
