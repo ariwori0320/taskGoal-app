@@ -2,10 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "taskgoal-app",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-p", "3456", "."],
-      "port": 3456
+      "name": "myflow-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-mock.mjs"],
+      "port": 3100
+    },
+    {
+      "name": "myflow-dev-oldschema",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-mock.mjs"],
+      "port": 3100,
+      "env": { "MOCK_OLD_SCHEMA": "1" }
     }
   ]
 }

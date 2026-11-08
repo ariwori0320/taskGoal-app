@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { errorResponse } from "@/lib/http"
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -10,8 +11,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if ("due_date" in body) updates.due_date = body.due_date || null
     const goal = await db.update("goals", params.id, updates)
     return NextResponse.json(goal)
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return errorResponse(e)
   }
 }
 
@@ -19,7 +20,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   try {
     await db.delete("goals", params.id)
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return errorResponse(e)
   }
 }

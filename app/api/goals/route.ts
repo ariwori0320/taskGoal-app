@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { errorResponse, respond } from "@/lib/http"
+import { UI_PRINCIPAL } from "@/lib/principal"
+import { listGoals } from "@/lib/services/goals"
 
 const USER_ID = "default"
 
@@ -7,14 +10,12 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2)
 }
 
+// 毎回のリクエストで処理する（ビルド時に静的化しない）
+export const dynamic = "force-dynamic"
+
+// 取得: 従来の項目に加えて、紐づくタスクの数と完了数（linked_total / linked_done）を返す
 export async function GET(req: Request) {
-  try {
-    const mode = new URL(req.url).searchParams.get("mode") || "work"
-    const data = await db.select("goals", { user_id: USER_ID, mode })
-    return NextResponse.json(data)
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
-  }
+  return respond(async () => listGoals(UI_PRINCIPAL, new URL(req.url).searchParams.get("mode") || "work"))
 }
 
 export async function POST(req: Request) {
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
       text: text.trim(), due_date: due_date || null, pct: 0,
     })
     return NextResponse.json(goal, { status: 201 })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return errorResponse(e)
   }
 }
