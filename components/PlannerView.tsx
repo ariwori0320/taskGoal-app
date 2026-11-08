@@ -172,6 +172,7 @@ export default function PlannerView() {
             type="button" className={`unplaced-item${selTask === t.id ? " is-selected" : ""}`} {...dragProps("task", t.id)}
             onClick={() => { setSelTask(t.id); if (!wide) sheets.open({ kind: "schedule", taskId: t.id, date: selDate || s.today }) }}
           >
+            {s.pathOf(t) && <span className="crumb">{s.pathOf(t)}</span>}
             <span className="t">{t.priority === "high" && <i className="dot high" title="優先度 高" />}{t.text}</span>
             <span className="m num">{[t.due_date ? `期限 ${fmtMdDow(t.due_date)}` : "", t.estimate_minutes ? fmtDuration(t.estimate_minutes) : ""].filter(Boolean).join(" ・ ") || "　"}</span>
           </button>

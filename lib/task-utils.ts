@@ -83,3 +83,65 @@ export function inDateRange(t: TaskRow, from: string, to: string): boolean {
   if (to && s > to) return false
   return true
 }
+
+// ---------- 親子（サブタスク・孫タスク）の階層 ----------
+
+export interface TaskNode {
+  /** 祖先の名前（ルート → 親の順）。自分自身は含まない。例: ["提案書", "資料づくり"] */
+  path: string[]
+  /** ルートを 0 とした深さ */
+  depth: number
+  /** いちばん上の親の id（自分がルートなら自分） */
+  root_id: string
+  /** 子を持たない = 実際に予定に入れて作業する単位 */
+  is_leaf: boolean
+  /** 直接の子の数と、そのうちの完了数 */
+  children_total: number
+  children_done: number
+  /** 子孫の「葉」の数と完了数。親の進み具合はこれで見る（自分が葉なら自分1件） */
+  leaves_total: number
+  leaves_done: number
+}
+
+/**
+ * 全タスクから、各タスクの階層情報を作る。親の完了は子と独立なので、進み具合は「葉」で数える。
+ * 親が一覧に無い（別カテゴリなど）場合は、見えている範囲でルート扱いにする。循環があっても止まる。
+ */
+export function buildHierarchy(all: TaskRow[], today: string): Map<string, TaskNode> {
+  const byId = new Map(all.map(t => [t.id, t]))
+  const kids = new Map<string, TaskRow[]>()
+  for (const t of all) {
+    if (t.parent_id && byId.has(t.parent_id)) {
+      const a = kids.get(t.parent_id)
+      if (a) a.push(t); else kids.set(t.parent_id, [t])
+    }
+  }
+  const out = new Map<string, TaskNode>()
+  const leafCounts = (t: TaskRow, seen: Set<string>): { total: number; done: number } => {
+    if (seen.has(t.id)) return { total: 0, done: 0 }
+    seen.add(t.id)
+    const cs = kids.get(t.id) ?? []
+    if (cs.length === 0) return { total: 1, done: isTaskDone(t, today) ? 1 : 0 }
+    return cs.reduce((a, c) => { const r = leafCounts(c, seen); return { total: a.total + r.total, done: a.done + r.done } }, { total: 0, done: 0 })
+  }
+  for (const t of all) {
+    const path: string[] = []
+    let cur: TaskRow = t
+    let root = t.id
+    const seen = new Set([t.id])
+    while (cur.parent_id && byId.has(cur.parent_id) && !seen.has(cur.parent_id)) {
+      cur = byId.get(cur.parent_id)!
+      seen.add(cur.id)
+      path.unshift(cur.text)
+      root = cur.id
+    }
+    const cs = kids.get(t.id) ?? []
+    const leaves = leafCounts(t, new Set())
+    out.set(t.id, {
+      path, depth: path.length, root_id: root, is_leaf: cs.length === 0,
+      children_total: cs.length, children_done: cs.filter(c => isTaskDone(c, today)).length,
+      leaves_total: leaves.total, leaves_done: leaves.done,
+    })
+  }
+  return out
+}

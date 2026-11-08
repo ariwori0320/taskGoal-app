@@ -58,3 +58,29 @@ test("期間フィルター: 期間に重なるタスクだけ。繰り返しは
   assert.equal(inDateRange(none, "2026-11-01", ""), false)
   assert.equal(inDateRange(rec, "2026-11-01", "2026-11-02"), true)
 })
+
+import { buildHierarchy } from "../lib/task-utils"
+
+test("階層: 子・孫の path / depth / 葉 / 進み具合（葉で数える）", () => {
+  const all = [
+    t({ id: "提案書" }),
+    t({ id: "資料づくり", parent_id: "提案書" }),
+    t({ id: "グラフ", parent_id: "資料づくり", done: true }),
+    t({ id: "表", parent_id: "資料づくり" }),
+    t({ id: "見直し", parent_id: "提案書" }),
+    t({ id: "単独" }),
+  ]
+  const h = buildHierarchy(all, "2026-11-08")
+  assert.deepEqual([h.get("提案書")!.path, h.get("提案書")!.depth, h.get("提案書")!.is_leaf], [[], 0, false])
+  assert.deepEqual([h.get("グラフ")!.path, h.get("グラフ")!.depth, h.get("グラフ")!.root_id, h.get("グラフ")!.is_leaf], [["提案書", "資料づくり"], 2, "提案書", true])
+  // 親の進み具合: 葉は グラフ(済)・表・見直し の3件中1件
+  assert.deepEqual([h.get("提案書")!.leaves_total, h.get("提案書")!.leaves_done], [3, 1])
+  assert.deepEqual([h.get("資料づくり")!.leaves_total, h.get("資料づくり")!.leaves_done, h.get("資料づくり")!.children_total, h.get("資料づくり")!.children_done], [2, 1, 2, 1])
+  assert.deepEqual([h.get("単独")!.leaves_total, h.get("単独")!.leaves_done, h.get("単独")!.is_leaf], [1, 0, true])
+})
+
+test("階層: 親が見えない子はルート扱い／循環があっても止まる", () => {
+  const h = buildHierarchy([t({ id: "迷子", parent_id: "不明" }), t({ id: "a", parent_id: "b" }), t({ id: "b", parent_id: "a" })], "2026-11-08")
+  assert.deepEqual([h.get("迷子")!.path, h.get("迷子")!.depth], [[], 0])
+  assert.ok(h.get("a")!.depth <= 1 && h.get("b")!.depth <= 1)
+})

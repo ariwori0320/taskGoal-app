@@ -184,6 +184,7 @@ export default function HomeView() {
               <li key={r.key} className="row">
                 <Check checked={taskDone} mixed={partial} label={`${t.text} を${taskDone ? "未完了に戻す" : partial ? "完了にする（今日の分は実施済み）" : "完了にする"}`} onChange={() => s.toggleTask(t)} />
                 <div className="row-main">
+                  {s.pathOf(t) && <span className="crumb">{s.pathOf(t)}</span>}
                   <span className={`row-title${taskDone ? " is-done" : ""}`}>{t.priority === "high" && <i className="dot high" title="優先度 高" />}{t.text}</span>
                   <div className="row-meta">
                     {r.box ? <>
@@ -218,6 +219,7 @@ export default function HomeView() {
             <li key={t.id} className="row">
               <Check checked={false} label={`${t.text} を完了にする`} onChange={() => s.toggleTask(t)} />
               <div className="row-main">
+                {s.pathOf(t) && <span className="crumb">{s.pathOf(t)}</span>}
                 <span className="row-title">{t.priority === "high" && <i className="dot high" title="優先度 高" />}{t.text}</span>
                 <div className="row-meta">
                   {t.due_date && <span className={t.due_date < today ? "late" : undefined}>期限 {fmtMdDow(t.due_date)}（{relDay(t.due_date, today)}）</span>}
@@ -246,6 +248,7 @@ export default function HomeView() {
             <li key={t.id} className="row">
               <Check checked={false} label={`${t.text} を完了にする`} onChange={() => s.toggleTask(t)} />
               <div className="row-main">
+                {s.pathOf(t) && <span className="crumb">{s.pathOf(t)}</span>}
                 <span className="row-title">{t.text}</span>
                 <div className="row-meta"><span className={t.due_date! < today ? "late" : "soon"}>{relDay(t.due_date, today)}</span><span>{fmtMdDow(t.due_date!)}</span>{hasPlanned(t.id) ? <span>予定あり</span> : <span>未配置</span>}</div>
               </div>

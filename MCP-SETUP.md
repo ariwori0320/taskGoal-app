@@ -64,7 +64,8 @@ ChatGPT の画面の仕様は変わりやすく、プランや管理者の設定
 | ツール | 必要な権限 | 内容 |
 |---|---|---|
 | `get_my_access` | なし | 見えるカテゴリ・使える操作・今日の日付・時間帯（朝/昼/夜） |
-| `list_tasks` `get_task` | 閲覧 | タスク一覧／詳細（サブタスク・予定・見積りに対する配置状況） |
+| `list_tasks` `get_task` | 閲覧 | タスク一覧／詳細。子・孫タスクには親の経路(`path`)・深さ・葉か・子と葉の進み具合(`children` / `leaves`)が付く |
+| `get_unplaced_tasks` | 閲覧 | 未配置のタスク（まだ予定に入っていない作業単位＝子・孫を含む葉）。親の経路と、予定に入っていない見積り分つき |
 | `list_goals` `get_goal_progress` | 閲覧 | 目標と進捗、ひも付いたタスクの完了数 |
 | `list_timeboxes` `get_schedule` | 閲覧 | 予定／期間のスケジュール（固定予定・予定・余白の警告） |
 | `get_completion_history` `get_postponements` `get_summary` | 閲覧 | 完了履歴／先送りの状況／週次・月次の集計 |

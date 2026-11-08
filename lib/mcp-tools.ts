@@ -13,7 +13,8 @@ import { getGoalProgress, linkTaskToGoal, listGoals } from "./services/goals"
 import { getSchedule } from "./services/schedule"
 import { loadSettings } from "./services/settings"
 import { createTimebox, listTimeboxes, splitTimebox, unplaceTask, updateTimebox } from "./services/timeboxes"
-import { addTask, changeTaskCategory, completeTask, deleteTask, getTaskDetail, listTasks, shapeTask, updateTask } from "./services/tasks"
+import { addTask, changeTaskCategory, completeTask, deleteTask, getTaskDetail, listTasks, listUnplacedTasks, shapeTask, updateTask } from "./services/tasks"
+import { buildHierarchy, type TaskNode } from "./task-utils"
 import { hhmmToMinutes, minutesToHhmm, nowInTz } from "./time"
 import type { TaskRow, TimeboxDb } from "./types"
 
@@ -34,6 +35,17 @@ function shapeBox(b: TimeboxDb & { task_text?: string | null }, settings: Settin
     start: minutesToHhmm(b.window_start), end: minutesToHhmm(b.window_end),
     slot: presetForWindow(settings, b.window_start, b.window_end)?.key ?? null,
     minutes: b.planned_minutes, status: b.status, actual_minutes: b.actual_minutes, kept_window: b.kept_window,
+  }
+}
+
+/** shapeTask に、親子の情報（親の経路・深さ・葉か・子と葉の進み具合）を足す */
+function withNode<T extends object>(shaped: T, n: TaskNode | undefined) {
+  if (!n) return shaped
+  return {
+    ...shaped,
+    path: n.path, depth: n.depth, root_id: n.root_id, is_leaf: n.is_leaf,
+    children: { total: n.children_total, done: n.children_done },
+    leaves: { total: n.leaves_total, done: n.leaves_done },
   }
 }
 
@@ -67,7 +79,7 @@ function userMessage(e: unknown): string {
 }
 
 export const TOOL_NAMES = [
-  "get_my_access", "list_tasks", "get_task", "list_goals", "get_goal_progress", "list_timeboxes", "get_schedule",
+  "get_my_access", "list_tasks", "get_unplaced_tasks", "get_task", "list_goals", "get_goal_progress", "list_timeboxes", "get_schedule",
   "get_completion_history", "get_postponements", "get_summary",
   "add_task", "update_task", "complete_task", "change_task_category", "link_task_to_goal",
   "create_timebox", "move_timebox", "resize_timebox", "split_timebox", "unplace_task", "delete_task",
@@ -125,7 +137,18 @@ export function registerTools(server: McpServer, p: Principal) {
     annotations: read,
   }, async a => {
     const r = await listTasks(p, a)
-    return { today: r.today, count: r.tasks.length, tasks: r.tasks.map(t => shapeTask(t, r.today)) }
+    return { today: r.today, count: r.tasks.length, tasks: r.tasks.map(t => withNode(shapeTask(t, r.today), r.hierarchy.get(t.id))) }
+  })
+
+  tool("get_unplaced_tasks", "read", {
+    title: "未配置のタスク", description: "まだ予定(タイムボックス)に入っていない、これから作業するタスクの一覧。子・孫タスクも含み、親は見出しとして path に入る(親自体は一覧に出さない)。期限が早い順。unplaced_minutes は見積りのうち予定に入っていない分。",
+    inputSchema: { mode: modeEnum.optional(), limit: z.number().int().min(1).max(500).optional() }, annotations: read,
+  }, async a => {
+    const r = await listUnplacedTasks(p, a)
+    return {
+      today: r.today, count: r.items.length,
+      tasks: r.items.map(i => ({ ...withNode(shapeTask(i.task, r.today), i.node), planned_minutes: i.planned_minutes, done_minutes: i.done_minutes, unplaced_minutes: i.unplaced_minutes })),
+    }
   })
 
   tool("get_task", "read", {
@@ -133,13 +156,15 @@ export function registerTools(server: McpServer, p: Principal) {
     inputSchema: { id: z.string() }, annotations: read,
   }, async a => {
     const d = await getTaskDetail(p, a.id)
+    // 親の経路は、見える範囲(許可されたカテゴリ)の全タスクから作る
+    const hier = buildHierarchy((await listTasks(p, { mode: d.task.mode, status: "all", limit: 2000 })).tasks, d.today)
     const settings = await loadSettings(p.userId)
     const planned = d.timeboxes.filter(b => b.status === "planned").reduce((s, b) => s + b.planned_minutes, 0)
     const done = d.timeboxes.filter(b => b.status === "done").reduce((s, b) => s + (b.actual_minutes ?? b.planned_minutes), 0)
     const est = d.task.estimate_minutes ?? null
     return {
-      task: shapeTask(d.task, d.today),
-      subtasks: d.children.map((c: TaskRow) => shapeTask(c, d.today)),
+      task: withNode(shapeTask(d.task, d.today), hier.get(d.task.id)),
+      subtasks: d.children.map((c: TaskRow) => withNode(shapeTask(c, d.today), hier.get(c.id))),
       timeboxes: d.timeboxes.map(b => shapeBox(b, settings)),
       plan: { estimate_minutes: est, planned_minutes: planned, done_minutes: done, unplaced_minutes: est === null ? null : Math.max(0, est - planned - done) },
     }

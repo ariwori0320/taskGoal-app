@@ -476,6 +476,13 @@ export function useStoreState() {
     return m
   }, [tasks])
   const taskById = useMemo(() => new Map(tasks.map(t => [t.id, t])), [tasks])
+  /** 親の経路（例: "提案書 › 資料づくり"）。ルートなら空文字。子・孫タスクが一覧に単独で出たときの手がかりにする */
+  const pathOf = useCallback((t: TaskRow): string => {
+    const names: string[] = []
+    let cur: TaskRow | undefined = t
+    for (let i = 0; i < 5 && cur?.parent_id; i++) { cur = taskById.get(cur.parent_id); if (cur) names.unshift(cur.text) }
+    return names.join(" › ")
+  }, [taskById])
   const boxesByTask = useMemo(() => {
     const m = new Map<string, TimeboxDb[]>()
     for (const b of boxes) { const a = m.get(b.task_id); if (a) a.push(b); else m.set(b.task_id, [b]) }
@@ -493,7 +500,7 @@ export function useStoreState() {
   return {
     mode, setMode, tab, setTab, ready, loading, tasks, goals, memos, yearGoal, boxes, settings, today, now,
     homeSched, weekSched, weekFrom, setWeekFrom, showOther, setShowOther, migration, toasts, dismiss, toast, flash, session, setSession,
-    undoLen, undo, childrenOf, taskById, boxesByTask, unplaced,
+    undoLen, undo, childrenOf, taskById, pathOf, boxesByTask, unplaced,
     reload: () => loadAll(modeRef.current), refresh,
     addTask, saveTask, toggleTask, deleteTask, reorderTasks,
     placeTask, moveBox, releaseBox, unplaceTask, completeBox, splitBox, startNow,
