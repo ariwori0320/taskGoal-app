@@ -156,6 +156,16 @@ export function useStoreState() {
     try { const t = await api<TaskRow[]>(`/api/tasks?mode=${m}`); if (m === modeRef.current) setTasks(t) } catch (e) { fail(e, "読み込めませんでした") }
   }, [fail])
 
+  // 日付をまたいだら、「今日」の予定・警告・タスク（繰り返しの完了状態）を取り直す。
+  // 読み込み直後の基準日は記録するだけで、取り直しは日付が変わった時にだけ行う
+  const loadedDay = useRef<string | null>(null)
+  useEffect(() => {
+    if (!ready) return
+    const prev = loadedDay.current
+    loadedDay.current = today
+    if (prev && prev !== today) { void refresh(); void reloadTasks() }
+  }, [ready, today, refresh, reloadTasks])
+
   // 起動時: 前回のカテゴリ・画面・進行中の取り組みを復元
   useEffect(() => {
     const m = lsGet(LS.mode); const t = lsGet(LS.tab)
