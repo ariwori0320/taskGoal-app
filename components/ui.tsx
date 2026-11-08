@@ -29,7 +29,8 @@ export function Icon({ name, size = 20 }: { name: keyof typeof PATHS | string; s
 
 // ---------- チェック（完了の手応え：チェックが描かれ、軽く弾み、波紋が広がる） ----------
 
-export function Check({ checked, onChange, label, small }: { checked: boolean; onChange: (next: boolean) => void; label: string; small?: boolean }) {
+/** mixed: 予定(今日の分)は実施したが、タスクはまだ完了していない状態。押すとタスクを完了にする。 */
+export function Check({ checked, onChange, label, small, mixed }: { checked: boolean; onChange: (next: boolean) => void; label: string; small?: boolean; mixed?: boolean }) {
   const [pop, setPop] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
@@ -37,7 +38,7 @@ export function Check({ checked, onChange, label, small }: { checked: boolean; o
     <button
       type="button"
       role="checkbox"
-      aria-checked={checked}
+      aria-checked={mixed && !checked ? "mixed" : checked}
       aria-label={label}
       className={`check${small ? " sm" : ""}${pop ? " pop" : ""}`}
       onClick={e => {

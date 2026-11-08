@@ -185,6 +185,8 @@ h1, h2, h3 { font-weight: 600; line-height: 1.3; }
 .check svg { width: 14px; height: 14px; stroke: #fff; stroke-width: 3.2; fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; stroke-dashoffset: 24; transition: stroke-dashoffset .3s var(--ease) .04s; }
 .check[aria-checked="true"] .check-box { background: var(--accent); border-color: var(--accent); }
 .check[aria-checked="true"] svg { stroke-dashoffset: 0; }
+.check[aria-checked="mixed"] .check-box { border-color: var(--accent); background: var(--accent-soft); }
+.check[aria-checked="mixed"] .check-box::before { content: ""; width: 10px; height: 2.5px; border-radius: 2px; background: var(--accent); }
 .check.pop .check-box { animation: pop .42s cubic-bezier(.2, .9, .3, 1.5); }
 .check.pop .check-box::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--accent); animation: ring .6s ease-out forwards; }
 .check.sm .check-box { width: 20px; height: 20px; }

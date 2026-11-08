@@ -177,17 +177,19 @@ export default function HomeView() {
           {ordered.map(r => {
             const t = r.task
             const done = isRowDone(r)
+            const taskDone = isTaskDone(t, today)
+            const partial = !taskDone && r.box?.status === "done" // 今日の分は実施したが、タスクは未完了
             const passed = r.box && r.box.status === "planned" && r.box.window_end <= now.minutes
             return (
               <li key={r.key} className="row">
-                <Check checked={isTaskDone(t, today)} label={`${t.text} を${isTaskDone(t, today) ? "未完了に戻す" : "完了にする"}`} onChange={() => s.toggleTask(t)} />
+                <Check checked={taskDone} mixed={partial} label={`${t.text} を${taskDone ? "未完了に戻す" : partial ? "完了にする（今日の分は実施済み）" : "完了にする"}`} onChange={() => s.toggleTask(t)} />
                 <div className="row-main">
-                  <span className={`row-title${done ? " is-done" : ""}`}>{t.priority === "high" && <i className="dot high" title="優先度 高" />}{t.text}</span>
+                  <span className={`row-title${taskDone ? " is-done" : ""}`}>{t.priority === "high" && <i className="dot high" title="優先度 高" />}{t.text}</span>
                   <div className="row-meta">
                     {r.box ? <>
                       <span className="num">{windowText(settings, r.box.window_start, r.box.window_end)}</span>
                       <span>{fmtDuration(r.box.planned_minutes)}</span>
-                      {r.box.status === "done" && <span>実施済み{r.box.kept_window === false ? "（時間帯の外）" : ""}</span>}
+                      {r.box.status === "done" && <span style={{ color: "var(--accent-hover)", fontWeight: 600 }}>今日の分は実施済み{r.box.kept_window === false ? "（時間帯の外）" : ""}</span>}
                       {passed && <span className="soon">時間帯を過ぎました</span>}
                     </> : <span>{recurrenceLabel(t)}の繰り返し</span>}
                     {t.due_date && !done && <span className={t.due_date < today ? "late" : undefined}>期限 {relDay(t.due_date, today)}</span>}
