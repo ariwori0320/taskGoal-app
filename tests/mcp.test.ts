@@ -362,3 +362,34 @@ test("R-10: change_task_category の応答の「完了か」は設定のタイ�
   assert.equal(r.isError, false)
   assert.equal((r.data as any).task.completed, true) // eslint-disable-line @typescript-eslint/no-explicit-any
 })
+
+test("R-14: 管理キーの認証に失敗し続けると、接続元ごとに一時ブロックされる（正しいキーでも）。他の接続元には影響しない", async () => {
+  const { resetThrottle, MAX_FAILURES } = await import("../lib/throttle")
+  resetThrottle()
+  const asIp = (ip: string, key: string | null) => async () => {
+    const headers: Record<string, string> = { "x-forwarded-for": ip }
+    if (key) headers.Authorization = `Bearer ${key}`
+    const res = await R.tokens.GET(new Request("http://localhost/api/admin/ai-tokens", { headers }), { params: { id: "" } })
+    return { status: res.status, retry: res.headers.get("Retry-After") }
+  }
+  for (let i = 0; i < MAX_FAILURES; i++) assert.equal((await asIp("203.0.113.9", `wrong-${i}`)()).status, 401)
+  const blocked = await asIp("203.0.113.9", ADMIN_KEY)()
+  assert.equal(blocked.status, 429, "ブロック中は正しいキーでも通らない")
+  assert.ok(Number(blocked.retry) > 0, "Retry-After が付く")
+  assert.equal((await asIp("198.51.100.7", ADMIN_KEY)()).status, 200, "別の接続元は通る")
+  resetThrottle()
+  assert.equal((await asIp("203.0.113.9", ADMIN_KEY)()).status, 200)
+})
+
+test("R-14: 成功すると失敗の回数はリセットされる／時間が過ぎればブロックは解ける", async () => {
+  const T = await import("../lib/throttle")
+  T.resetThrottle()
+  for (let i = 0; i < T.MAX_FAILURES - 1; i++) T.recordFailure("k", 1000)
+  assert.equal(T.blockedSeconds("k", 1000), 0, "上限の手前ではブロックしない")
+  T.recordFailure("k", 1000)
+  assert.ok(T.blockedSeconds("k", 1000) > 0)
+  assert.equal(T.blockedSeconds("k", 1000 + T.WINDOW_MS), 0, "時間が過ぎれば解ける")
+  T.recordFailure("j", 1000); T.clearFailures("j")
+  for (let i = 0; i < T.MAX_FAILURES - 1; i++) T.recordFailure("j", 2000)
+  assert.equal(T.blockedSeconds("j", 2000), 0, "成功でリセット済み")
+})
