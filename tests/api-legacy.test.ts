@@ -60,3 +60,36 @@ test("R-04: 目標の追加・更新・削除は従来どおり", async () => {
   assert.equal((await call(R.goal.DELETE, "DELETE", "/x", undefined, c.json.id)).status, 200)
   assert.equal(rows("goals").length, 0)
 })
+
+// ---------- R-11: 異常時に内部のエラー文を利用者へ返さない ----------
+
+const INTERNAL = { code: "42P01", message: 'relation "public.secret_internal_table" does not exist at host db.internal.example.com password=hunter2' }
+const leaks = (text: string) => /secret_internal_table|hunter2|internal\.example|42P01|relation/.test(text)
+
+test("R-11: 目標・メモ・今年の目標のAPIは、DBが失敗しても内部のエラー文を返さない（汎用メッセージ）", async () => {
+  const cases: [string, () => Promise<{ status: number; text: string }>, string][] = [
+    ["goals", () => call(R.goals.GET, "GET", "/api/goals?mode=private"), "goals GET"],
+    ["goals", () => call(R.goals.POST, "POST", "/api/goals", { text: "x", mode: "private" }), "goals POST"],
+    ["goals", () => call(R.goal.PATCH, "PATCH", "/x", { pct: 1 }, "g1"), "goals PATCH"],
+    ["goals", () => call(R.goal.DELETE, "DELETE", "/x", undefined, "g1"), "goals DELETE"],
+    ["memos", () => call(R.memos.GET, "GET", "/api/memos?mode=private"), "memos GET"],
+    ["memos", () => call(R.memos.POST, "POST", "/api/memos", { title: "t", mode: "private" }), "memos POST"],
+    ["memos", () => call(R.memo.PATCH, "PATCH", "/x", { title: "t" }, "m1"), "memos PATCH"],
+    ["memos", () => call(R.memo.DELETE, "DELETE", "/x", undefined, "m1"), "memos DELETE"],
+    ["highlights", () => call(R.highlights.GET, "GET", "/api/highlights?mode=private"), "highlights GET"],
+    ["highlights", () => call(R.highlights.PATCH, "PATCH", "/api/highlights", { mode: "private", year_text: "x" }), "highlights PATCH"],
+  ]
+  for (const [table, run, label] of cases) {
+    mock.failNext(table, 500, INTERNAL)
+    const r = await run()
+    assert.equal(r.status, 500, `${label}: 500`)
+    assert.ok(!leaks(r.text), `${label}: 内部のエラー文が漏れている → ${r.text}`)
+    assert.ok(typeof JSON.parse(r.text).error === "string" && JSON.parse(r.text).error.length > 0, `${label}: 利用者向けのメッセージがある`)
+  }
+})
+
+test("R-11: 入力の誤り(400)の文言は従来どおり利用者に返す", async () => {
+  const r = await call(R.goals.POST, "POST", "/api/goals", { text: "  ", mode: "private" })
+  assert.equal(r.status, 400)
+  assert.equal(typeof r.json.error, "string")
+})

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { errorResponse } from "@/lib/http"
 
 const USER_ID = "default"
 
@@ -17,8 +18,8 @@ export async function GET(req: Request) {
       year: row?.year_text || "",
       month: row?.month_text || "",
     })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return errorResponse(e)
   }
 }
 
@@ -47,7 +48,7 @@ export async function PATCH(req: Request) {
       year: row?.year_text || "",
       month: row?.month_text || "",
     })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return errorResponse(e)
   }
 }
