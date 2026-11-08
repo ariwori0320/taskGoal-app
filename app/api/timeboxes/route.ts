@@ -13,6 +13,7 @@ export async function GET(req: Request) {
       from: sp.get("from") ?? undefined,
       to: sp.get("to") ?? undefined,
       task_id: sp.get("task_id") ?? undefined,
+      keepOpen: sp.get("keepOpen") === "1",
     })
   })
 }

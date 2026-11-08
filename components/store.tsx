@@ -107,7 +107,7 @@ export function useStoreState() {
       const from = weekFromRef.current
       week = await api<Schedule>(`/api/planner?mode=${m}&from=${from}&to=${addDays(from, 6)}&includeOther=1`)
     }
-    const bx = await api<TimeboxDb[]>(`/api/timeboxes?mode=${m}&from=${addDays(t, -30)}`)
+    const bx = await api<TimeboxDb[]>(`/api/timeboxes?mode=${m}&from=${addDays(t, -30)}&keepOpen=1`)
     return { home, week, bx }
   }, [])
 

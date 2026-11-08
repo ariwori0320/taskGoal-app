@@ -560,3 +560,32 @@ test("R-03: 時間帯を変えない保存では何も動かない／ラベル�
   assert.deepEqual([(saved as any).carryover.moved, (saved as any).carryover.skipped], [0, 0])
   assert.equal(rows("myflow_timeboxes").find(x => x.id === box.id).window_start, 1140)
 })
+
+// ---------- R-20: 古い未実施の予定も、窓の外に落とさない ----------
+
+test("R-20: keepOpen を付けると、from より前の『未実施(planned)』の予定も含めて返す（実施済みは含めない）", async () => {
+  const t = await mkTask("古い予定のあるタスク", "private", { estimate_minutes: 60 })
+  const mkBox = async (date: string, status: string) => {
+    const b = (await B.createTimebox(UI, { task_id: t.id, date: addDays(today(), 5), ...NIGHT, planned_minutes: 10 })).timebox
+    const r = rows("myflow_timeboxes").find(x => x.id === b.id); r.date = date; r.status = status
+    return b.id
+  }
+  const oldPlanned = await mkBox(addDays(today(), -90), "planned")
+  const oldDone = await mkBox(addDays(today(), -91), "done")
+  const recent = await mkBox(addDays(today(), -10), "planned")
+  const from = addDays(today(), -30)
+  const plain = (await B.listTimeboxes(UI, { mode: "private", from })).map(b => b.id)
+  assert.deepEqual(plain, [recent], "既定の挙動は従来どおり")
+  const kept = (await B.listTimeboxes(UI, { mode: "private", from, keepOpen: true })).map(b => b.id)
+  assert.deepEqual(kept.sort(), [oldPlanned, recent].sort())
+  assert.ok(!kept.includes(oldDone))
+})
+
+test("R-20: 権限のないカテゴリの古い予定は keepOpen でも返らない", async () => {
+  const w = await mkTask("仕事の古い予定", "work", { estimate_minutes: 30 })
+  const b = (await B.createTimebox(UI, { task_id: w.id, date: addDays(today(), 3), ...NIGHT, planned_minutes: 10 })).timebox
+  rows("myflow_timeboxes").find(x => x.id === b.id).date = addDays(today(), -60)
+  const priv = ai(["private"], ["read"])
+  const r = await B.listTimeboxes(priv, { from: addDays(today(), -30), keepOpen: true })
+  assert.equal(r.length, 0)
+})

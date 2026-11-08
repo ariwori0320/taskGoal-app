@@ -58,6 +58,8 @@ export interface ListTimeboxesQuery {
   to?: string
   task_id?: string
   status?: "planned" | "done" | "released" | "active"
+  /** from より前でも、未実施(planned)の予定は含める（古い予定のあるタスクが「未配置」に見えないように） */
+  keepOpen?: boolean
 }
 
 export async function listTimeboxes(p: Principal, q: ListTimeboxesQuery = {}): Promise<TimeboxDb[]> {
@@ -73,7 +75,15 @@ export async function listTimeboxes(p: Principal, q: ListTimeboxesQuery = {}): P
   if (q.status && q.status !== "active") conds.push(["status", "eq", q.status])
   if (q.status === "active" || !q.status) conds.push(["status", "neq", "released"])
   try {
-    return (await db.find("myflow_timeboxes", conds, { order: "date.asc,window_start.asc", limit: 2000 })) as TimeboxDb[]
+    const rows = (await db.find("myflow_timeboxes", conds, { order: "date.asc,window_start.asc", limit: 2000 })) as TimeboxDb[]
+    if (q.keepOpen && q.from && !q.status) {
+      const old = (await db.find("myflow_timeboxes", [
+        ["user_id", "eq", p.userId], ["mode", "in", modes], ["status", "eq", "planned"], ["date", "lt", q.from],
+        ...(q.task_id ? [["task_id", "eq", q.task_id] as Cond] : []),
+      ], { order: "date.asc,window_start.asc", limit: 2000 })) as TimeboxDb[]
+      return [...old, ...rows]
+    }
+    return rows
   } catch (e) {
     if (isMissingTable(e)) return []
     throw e
