@@ -3,6 +3,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
+import { db } from "./db"
 import { recordEvent } from "./events"
 import { describeWarning } from "./planning"
 import { ServiceError, type Principal, type Scope } from "./principal"
@@ -34,6 +35,14 @@ function shapeBox(b: TimeboxDb & { task_text?: string | null }, settings: Settin
     slot: presetForWindow(settings, b.window_start, b.window_end)?.key ?? null,
     minutes: b.planned_minutes, status: b.status, actual_minutes: b.actual_minutes, kept_window: b.kept_window,
   }
+}
+
+/** 予定に付けるタスク名をまとめて引く。対象の予定は権限確認済み（サービス層が 404 にする）なので、そのタスクの名前だけを返す。 */
+async function titlesFor(p: Principal, ids: string[]): Promise<Map<string, string>> {
+  const uniq = Array.from(new Set(ids))
+  if (uniq.length === 0) return new Map()
+  const rows = (await db.find("tasks", [["user_id", "eq", p.userId], ["id", "in", uniq]], { limit: 2000 })) as TaskRow[]
+  return new Map(rows.map(t => [t.id, t.text]))
 }
 
 /** slot（朝/昼/夜）または start_time+end_time から時間帯(分)を決める。どちらも無ければ undefined。 */
@@ -152,8 +161,7 @@ export function registerTools(server: McpServer, p: Principal) {
   }, async a => {
     const settings = await loadSettings(p.userId)
     const rows = await listTimeboxes(p, a)
-    const tasks = await listTasks(p, { status: "all", limit: 2000 })
-    const titles = new Map(tasks.tasks.map(t => [t.id, t.text]))
+    const titles = await titlesFor(p, rows.map(b => b.task_id))
     return { count: rows.length, timeboxes: rows.map(b => shapeBox(b, settings, titles)) }
   })
 
@@ -225,7 +233,11 @@ export function registerTools(server: McpServer, p: Principal) {
   tool("change_task_category", "task_edit", {
     title: "タスクの所属カテゴリを変更", description: "仕事⇄プライベートを移す。サブタスクと予定も一緒に移る。移動先のカテゴリへのアクセス権も必要。多数に影響する場合は confirm:true が必要。",
     inputSchema: { id: z.string(), mode: modeEnum, confirm: z.boolean().optional() }, annotations: modify,
-  }, async a => changeTaskCategory(p, a.id, a.mode, { confirm: a.confirm }).then(r => ("task" in r && r.task ? { ...r, task: shapeTask(r.task, nowInTz("Asia/Tokyo").date) } : r)))
+  }, async a => {
+    const r = await changeTaskCategory(p, a.id, a.mode, { confirm: a.confirm })
+    if (!("task" in r) || !r.task) return r
+    return { ...r, task: shapeTask(r.task, nowInTz((await loadSettings(p.userId)).timezone).date) }
+  })
 
   tool("link_task_to_goal", "task_edit", {
     title: "タスクを目標にひも付ける", description: "同じカテゴリの目標にひも付ける。goal_id=null で解除。",
@@ -245,7 +257,7 @@ export function registerTools(server: McpServer, p: Principal) {
     if (!w) throw new ServiceError(400, "bad_request", "slot か start_time+end_time で時間帯を指定してください")
     const r = await createTimebox(p, { task_id: a.task_id, date: a.date, window_start: w.start, window_end: w.end, planned_minutes: a.minutes })
     const label = (s: number, e: number) => windowLabel(settings, s, e)
-    return { ok: true, timebox: shapeBox(r.timebox, settings), warnings: r.analysis.warnings.map(x => describeWarning(x, label)) }
+    return { ok: true, timebox: shapeBox(r.timebox, settings, await titlesFor(p, [r.timebox.task_id])), warnings: r.analysis.warnings.map(x => describeWarning(x, label)) }
   })
 
   tool("move_timebox", "schedule", {
@@ -259,7 +271,7 @@ export function registerTools(server: McpServer, p: Principal) {
     if (w) { patch.window_start = w.start; patch.window_end = w.end }
     const r = await updateTimebox(p, a.id, patch)
     const label = (s: number, e: number) => windowLabel(settings, s, e)
-    return { ok: true, timebox: shapeBox(r.timebox, settings), warnings: r.analysis.warnings.map(x => describeWarning(x, label)) }
+    return { ok: true, timebox: shapeBox(r.timebox, settings, await titlesFor(p, [r.timebox.task_id])), warnings: r.analysis.warnings.map(x => describeWarning(x, label)) }
   })
 
   tool("resize_timebox", "schedule", {
@@ -269,7 +281,7 @@ export function registerTools(server: McpServer, p: Principal) {
     const settings = await loadSettings(p.userId)
     const r = await updateTimebox(p, a.id, { planned_minutes: a.minutes })
     const label = (s: number, e: number) => windowLabel(settings, s, e)
-    return { ok: true, timebox: shapeBox(r.timebox, settings), warnings: r.analysis.warnings.map(x => describeWarning(x, label)) }
+    return { ok: true, timebox: shapeBox(r.timebox, settings, await titlesFor(p, [r.timebox.task_id])), warnings: r.analysis.warnings.map(x => describeWarning(x, label)) }
   })
 
   tool("split_timebox", "schedule", {
@@ -279,7 +291,8 @@ export function registerTools(server: McpServer, p: Principal) {
     const settings = await loadSettings(p.userId)
     const w = resolveWindow(a, settings)
     const r = await splitTimebox(p, a.id, { minutes: a.minutes, date: a.date, ...(w ? { window_start: w.start, window_end: w.end } : {}) })
-    return { ok: true, original: shapeBox(r.original, settings), created: shapeBox(r.created, settings) }
+    const titles = await titlesFor(p, [r.original.task_id, r.created.task_id])
+    return { ok: true, original: shapeBox(r.original, settings, titles), created: shapeBox(r.created, settings, titles) }
   })
 
   tool("unplace_task", "schedule", {

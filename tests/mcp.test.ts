@@ -330,3 +330,35 @@ test("get_my_access: 今日の日付・時間帯・使える操作を返す（AI
   assert.deepEqual(me.accessible_modes, ["private"])
   assert.deepEqual(me.time_slots.map((s: any) => [s.key, s.start, s.end]), [["morning", "06:00", "10:00"], ["noon", "12:00", "17:00"], ["night", "19:00", "22:00"]]) // eslint-disable-line @typescript-eslint/no-explicit-any
 })
+
+test("R-10: 予定の作成・移動・サイズ変更・分割の応答にタスク名が入る", async () => {
+  const d = today()
+  const task = await mk("資料づくり", "private", { estimate_minutes: 120 })
+  const t = await mint({ name: "planner", scopes: ["read", "schedule"] })
+  const created = await call(t.token, "create_timebox", { task_id: task.id, date: d, slot: "night", minutes: 60 })
+  const box = (created.data as any).timebox // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal(box.task_text, "資料づくり")
+  assert.equal(((await call(t.token, "move_timebox", { id: box.id, date: addDays(d, 1) })).data as any).timebox.task_text, "資料づくり") // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal(((await call(t.token, "resize_timebox", { id: box.id, minutes: 50 })).data as any).timebox.task_text, "資料づくり") // eslint-disable-line @typescript-eslint/no-explicit-any
+  const sp = (await call(t.token, "split_timebox", { id: box.id, minutes: 20, date: addDays(d, 2) })).data as any // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.deepEqual([sp.original.task_text, sp.created.task_text], ["資料づくり", "資料づくり"])
+  const list = (await call(t.token, "list_timeboxes", {})).data as any // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.ok(list.timeboxes.length >= 2 && list.timeboxes.every((b: any) => b.task_text === "資料づくり")) // eslint-disable-line @typescript-eslint/no-explicit-any
+})
+
+test("R-10: change_task_category の応答の「完了か」は設定のタイムゾーンの日付で判定する", async () => {
+  // 繰り返しタスクが「今日」完了済みかどうかは日付に依存する。設定のタイムゾーンが日付をまたぐ場所(例: Pacific/Kiritimati +14)なら
+  // Asia/Tokyo 固定だと判定がずれる。設定の tz の今日で completed を判定していること。
+  const { nowInTz } = await import("../lib/time")
+  // 東京と日付が食い違うタイムゾーンを選ぶ（+14時間と-11時間のどちらかは、いつでも東京と日付が違う）
+  const tdate = nowInTz("Asia/Tokyo").date
+  const tz = ["Pacific/Kiritimati", "Pacific/Pago_Pago"].find(z => nowInTz(z).date !== tdate)!
+  const kdate = nowInTz(tz).date
+  rows("myflow_settings").push({ user_id: "default", timezone: tz, presets: [], buffer_minutes: 5 })
+  const task = await mk("毎日の習慣", "private", { is_recurring: true, recurring_days: "0,1,2,3,4,5,6" })
+  rows("tasks").find(r => r.id === task.id).recurring_done_date = kdate // 設定tzの「今日」に完了済み
+  const t = await mint({ name: "editor", modes: ["work", "private"], scopes: ["read", "task_edit"] })
+  const r = await call(t.token, "change_task_category", { id: task.id, mode: "work" })
+  assert.equal(r.isError, false)
+  assert.equal((r.data as any).task.completed, true) // eslint-disable-line @typescript-eslint/no-explicit-any
+})
