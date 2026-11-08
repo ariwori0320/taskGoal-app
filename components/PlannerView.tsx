@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { describeWarning, type DayAnalysis } from "@/lib/planning"
 import { isTaskDone } from "@/lib/task-utils"
 import { addDays, DAY_LABELS, eachDay, fmtMdDow, minutesToHhmm, parseYmd, weekStart } from "@/lib/time"
@@ -14,16 +14,15 @@ import { Check, Icon } from "./ui"
 type Box = TimeboxDb & { task_text?: string | null }
 const MIME = "application/x-myflow"
 
+/** 画面幅の判定。初回の描画から実際の幅で判定し（matchMedia を直接読む）、リサイズも監視する。サーバー描画時は false。 */
 function useMedia(query: string): boolean {
-  const [m, setM] = useState(false)
-  useEffect(() => {
+  const subscribe = useCallback((cb: () => void) => {
     const mq = window.matchMedia(query)
-    const on = () => setM(mq.matches)
-    on()
-    mq.addEventListener("change", on)
-    return () => mq.removeEventListener("change", on)
+    mq.addEventListener("change", cb)
+    window.addEventListener("resize", cb)
+    return () => { mq.removeEventListener("change", cb); window.removeEventListener("resize", cb) }
   }, [query])
-  return m
+  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false)
 }
 
 interface Slot { key: string; label: string; start: number; end: number; custom?: boolean }
@@ -49,6 +48,19 @@ export default function PlannerView() {
   const buffer = s.settings.bufferMinutes
 
   // 表示中の日付（スマホ/タブレットで1日ずつ見るとき）
+  // スマホの日付帯: 選択中の日付を帯の中央へ寄せる（週の後ろの日が右に隠れないように）。ページ全体はスクロールさせない。
+  // 帯は読み込み後・画面幅の変化で後から描画されるため、effect ではなく ref コールバックで「現れた時／選択が変わった時」に合わせる
+  const centered = useRef<{ el: HTMLElement; label: string } | null>(null)
+  // 毎回の描画で呼ばれる（関数を安定させない）。帯の要素が変わった時／選択が変わった時だけ動かす
+  const stripRef = (strip: HTMLDivElement | null) => {
+    if (!strip) return
+    const chip = strip.querySelector<HTMLElement>("[aria-pressed='true']")
+    if (!chip) return
+    const label = chip.getAttribute("aria-label") || ""
+    if (centered.current && centered.current.el === strip && centered.current.label === label) return
+    centered.current = { el: strip, label }
+    strip.scrollLeft = chip.offsetLeft - (strip.clientWidth - chip.offsetWidth) / 2
+  }
   useEffect(() => { if (!selDate || !days.includes(selDate)) setSelDate(days.includes(s.today) ? s.today : days[0]) }, [days, s.today, selDate])
 
   const labelFor = (a: number, b: number) => presets.find(p => p.start === a && p.end === b)?.label ?? null
@@ -191,7 +203,7 @@ export default function PlannerView() {
       <div className="page">
         <div className="page-head"><h1 className="page-title">計画</h1></div>
         {Bar}
-        <div className="daystrip" role="group" aria-label="日付">
+        <div className="daystrip" ref={stripRef} role="group" aria-label="日付">
           {days.map(d => {
             const n = boxes.filter(b => b.date === d).length
             return (
