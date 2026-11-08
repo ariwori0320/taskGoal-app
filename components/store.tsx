@@ -249,9 +249,10 @@ export function useStoreState() {
     setTasks(prev => prev.map(x => x.id !== task.id ? x : (x.is_recurring ? { ...x, recurring_done_date: next ? t : null } : { ...x, done: next })))
     if (next) flashDone(task.id)
     try {
-      const res = await api<{ task: TaskRow; timebox: TimeboxDb | null; releasedTimeboxes: number }>(`/api/tasks/${task.id}/complete`, { method: "POST", body: { done: next } })
+      const res = await api<{ task: TaskRow; timebox: TimeboxDb | null; releasedTimeboxes: number; restoredTimeboxes?: number }>(`/api/tasks/${task.id}/complete`, { method: "POST", body: { done: next } })
       setTasks(prev => prev.map(x => (x.id === task.id ? res.task : x)))
-      if (boxesRef.current.some(b => b.task_id === task.id)) refresh()
+      // 予定が動いたとき（今日の分が実施済みに/残りが解放/戻したときに復元）は予定を取り直す
+      if (res.releasedTimeboxes > 0 || (res.restoredTimeboxes ?? 0) > 0 || res.timebox || boxesRef.current.some(b => b.task_id === task.id)) refresh()
     } catch (e) { fail(e, "完了を保存できませんでした"); reloadTasks() }
   }, [fail, flashDone, refresh, reloadTasks])
 

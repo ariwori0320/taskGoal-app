@@ -284,6 +284,7 @@ export async function completeTask(p: Principal, id: string, done = true) {
 
   let doneBox: TimeboxDb | null = null
   let released = 0
+  let restored = 0
   if (done) {
     try {
       const planned = (await db.find("myflow_timeboxes", [["user_id", "eq", p.userId], ["task_id", "eq", id], ["status", "eq", "planned"]], { limit: 200 })) as TimeboxDb[]
@@ -307,13 +308,24 @@ export async function completeTask(p: Principal, id: string, done = true) {
     } catch (e) {
       if (!isMissingTable(e)) throw e
     }
+  } else if (!t.is_recurring) {
+    // 未完了に戻す: 完了で解放した「今日以降」の予定を元の予定に戻す（押し間違いで先の予定が消えないように）。
+    // 過去の日付の予定と、実施済みの記録は戻さない。
+    try {
+      const back = (await db.updateWhere("myflow_timeboxes", [
+        ["user_id", "eq", p.userId], ["task_id", "eq", id], ["status", "eq", "released"], ["date", "gte", now.date],
+      ], { status: "planned", updated_at: new Date().toISOString() })) as unknown[]
+      restored = back.length
+    } catch (e) {
+      if (!isMissingTable(e)) throw e
+    }
   }
 
   await recordEvent(p, {
     type: done ? "task_completed" : "task_reopened", mode: t.mode, task_id: id, timebox_id: doneBox?.id ?? null,
-    payload: done ? { kept_window: doneBox?.kept_window ?? null, had_timebox: !!doneBox, recurring: !!t.is_recurring } : {},
+    payload: done ? { kept_window: doneBox?.kept_window ?? null, had_timebox: !!doneBox, recurring: !!t.is_recurring } : { restored_timeboxes: restored },
   })
-  return { task, timebox: doneBox, releasedTimeboxes: released, today: now.date }
+  return { task, timebox: doneBox, releasedTimeboxes: released, restoredTimeboxes: restored, today: now.date }
 }
 
 // ---------- 削除 ----------

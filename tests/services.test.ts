@@ -478,3 +478,36 @@ test("固定予定: 『作業を入れてよい枠』は保存でき、勤務時
   const upd = await SC.updateFixedEvent(UI, ev.id, { allows_tasks: false })
   assert.equal(upd.allows_tasks, false)
 })
+
+test("R-23: 完了にしたあと未完了に戻すと、解放された先の予定が復元される（過去の予定・実施済みは戻さない）", async () => {
+  const d = today()
+  const t = await mkTask("押し間違えのタスク", "private", { estimate_minutes: 120 })
+  const past = await B.createTimebox(UI, { task_id: t.id, date: addDays(d, -2), ...NIGHT, planned_minutes: 30 })
+  const doneBox = await B.createTimebox(UI, { task_id: t.id, date: d, ...NIGHT, planned_minutes: 30 })
+  const tomorrow = await B.createTimebox(UI, { task_id: t.id, date: addDays(d, 1), ...NIGHT, planned_minutes: 30 })
+  const later = await B.createTimebox(UI, { task_id: t.id, date: addDays(d, 3), ...NIGHT, planned_minutes: 30 })
+  const status = (id: string) => rows("myflow_timeboxes").find(b => b.id === id).status
+
+  await T.completeTask(UI, t.id) // 完了: 今日の分は実施済み、先の予定は解放、過去の予定も解放
+  assert.equal(status(doneBox.timebox.id), "done")
+  assert.equal(status(tomorrow.timebox.id), "released")
+  assert.equal(status(later.timebox.id), "released")
+
+  const r = await T.completeTask(UI, t.id, false) // 押し間違いを戻す
+  assert.equal(r.task.done, false)
+  assert.equal(status(tomorrow.timebox.id), "planned", "明日の予定が戻る")
+  assert.equal(status(later.timebox.id), "planned", "あさって以降の予定が戻る")
+  assert.equal(status(doneBox.timebox.id), "done", "実施済みの記録はそのまま")
+  assert.equal(status(past.timebox.id), "released", "過去の日付の予定は戻さない")
+  assert.equal((await T.getTaskDetail(UI, t.id)).timeboxes.filter(b => b.status === "planned").length, 2)
+})
+
+test("R-23: 繰り返しタスクの完了・取り消しは予定に影響しない", async () => {
+  const d = today()
+  const t = await mkTask("毎日のこと", "private", { is_recurring: true })
+  const b = await B.createTimebox(UI, { task_id: t.id, date: addDays(d, 1), ...NIGHT, planned_minutes: 30 })
+  await T.completeTask(UI, t.id)
+  assert.equal(rows("myflow_timeboxes").find(x => x.id === b.timebox.id).status, "planned", "繰り返しは先の予定を解放しない")
+  await T.completeTask(UI, t.id, false)
+  assert.equal(rows("myflow_timeboxes").find(x => x.id === b.timebox.id).status, "planned")
+})
