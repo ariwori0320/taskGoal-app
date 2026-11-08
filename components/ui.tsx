@@ -62,6 +62,34 @@ export function Check({ checked, onChange, label, small, mixed }: { checked: boo
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
+// シートが続けて開閉しても、最初に開いたときの操作元へフォーカスを戻すための記録。
+// （A を閉じて B を開く、B の中でさらに C を開く、といった切り替えで、途中の要素へ戻して失わないため）
+let openSheets = 0
+let focusOrigin: HTMLElement | null = null
+let prevBodyOverflow = ""
+
+function enterSheet() {
+  if (openSheets === 0 && !focusOrigin) {
+    const a = document.activeElement as HTMLElement | null
+    focusOrigin = a && a !== document.body ? a : null
+  }
+  // 背面のスクロール止めは、最初のシートが開いたときだけ設定し、すべて閉じたときに戻す（入れ替え中に固まらないように）
+  if (openSheets === 0) { prevBodyOverflow = document.body.style.overflow; document.body.style.overflow = "hidden" }
+  openSheets++
+}
+
+function leaveSheet() {
+  openSheets--
+  if (openSheets === 0) document.body.style.overflow = prevBodyOverflow
+  // 閉じてすぐ別のシートが開く場合（同じ描画内の入れ替え）に備えて、少し待ってから戻す
+  setTimeout(() => {
+    if (openSheets > 0) return
+    const o = focusOrigin
+    focusOrigin = null
+    if (o && o.isConnected) o.focus({ preventScroll: true })
+  }, 0)
+}
+
 export function Sheet({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const titleId = useId()
@@ -69,9 +97,7 @@ export function Sheet({ title, onClose, children, footer, wide }: { title: strin
   closeRef.current = onClose
 
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
+    enterSheet()
     const root = ref.current
     // 最初の入力欄（なければ最初の操作部品）へフォーカス
     const first = root?.querySelector<HTMLElement>("input:not([type=checkbox]):not([type=range]), textarea, select") ?? root?.querySelector<HTMLElement>(FOCUSABLE)
@@ -89,8 +115,7 @@ export function Sheet({ title, onClose, children, footer, wide }: { title: strin
     document.addEventListener("keydown", onKey, true)
     return () => {
       document.removeEventListener("keydown", onKey, true)
-      document.body.style.overflow = prevOverflow
-      previous?.focus?.({ preventScroll: true })
+      leaveSheet()
     }
   }, [])
 

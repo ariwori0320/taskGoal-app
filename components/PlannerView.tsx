@@ -244,12 +244,12 @@ export default function PlannerView() {
         </details>
       )}
       <div className="planner">
-        <div className="week" role="grid" aria-label="週間プランナー">
+        <div className="week" role="group" aria-label="週間プランナー">
           {days.map(d => {
             const dt = parseYmd(d)!
             const dow = new Date(d + "T00:00:00Z").getUTCDay()
             return (
-              <div key={d} className={`day-col${d === s.today ? " is-today" : ""}${dow === 0 || dow === 6 ? " is-weekend" : ""}`} role="gridcell">
+              <div key={d} className={`day-col${d === s.today ? " is-today" : ""}${dow === 0 || dow === 6 ? " is-weekend" : ""}`} role="group" aria-label={fmtMdDow(d)}>
                 <div className="day-head"><div className="dow">{DAY_LABELS[dow]}</div><div className="d num" aria-label={`${dt.m}月${dt.d}日${warnCount(d) > 0 ? "（注意あり）" : ""}`}>{dt.d}{warnCount(d) > 0 && <span className="flag" aria-hidden="true">⚠</span>}</div></div>
                 {dayBody(d, false)}
               </div>
