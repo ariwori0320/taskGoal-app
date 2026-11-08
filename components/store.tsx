@@ -99,11 +99,11 @@ export function useStoreState() {
   // ---- 読み込み ----
   const labelFor = useCallback((s: number, e: number) => windowLabel(settingsRef.current, s, e), [])
 
-  const fetchSchedules = useCallback(async (m: Mode) => {
+  const fetchSchedules = useCallback(async (m: Mode, withWeek: boolean) => {
     const t = nowRef.current.date
     const home = await api<Schedule>(`/api/planner?mode=${m}&from=${t}&to=${addDays(t, 2)}&includeOther=1`)
     let week: Schedule | null = null
-    if (tabRef.current === "planner" && weekFromRef.current) {
+    if (withWeek && tabRef.current === "planner" && weekFromRef.current) {
       const from = weekFromRef.current
       week = await api<Schedule>(`/api/planner?mode=${m}&from=${from}&to=${addDays(from, 6)}&includeOther=1`)
     }
@@ -120,7 +120,7 @@ export function useStoreState() {
         api<GoalWithLinks[]>(`/api/goals?mode=${m}`),
         api<MemoRow[]>(`/api/memos?mode=${m}`),
         api<{ year: string }>(`/api/highlights?mode=${m}`),
-        fetchSchedules(m),
+        fetchSchedules(m, false), // 週は、計画画面を開いたときに画面側が取得する（重複取得を避ける）
       ])
       if (my !== seq.current) return // 古い応答は捨てる（素早いカテゴリ切替での取り違え防止）
       setTasks(Array.isArray(t) ? t : []); setGoals(Array.isArray(g) ? g : []); setMemos(Array.isArray(mm) ? mm : [])
@@ -144,7 +144,7 @@ export function useStoreState() {
     const m = modeRef.current
     const my = seq.current
     try {
-      const sch = await fetchSchedules(m)
+      const sch = await fetchSchedules(m, true)
       if (my !== seq.current || m !== modeRef.current) return
       setHomeSched(sch.home); setBoxes(sch.bx); if (sch.week) setWeekSched(sch.week)
       setMigration(!!sch.home.migrationRequired)
