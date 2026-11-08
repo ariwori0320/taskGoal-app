@@ -511,3 +511,52 @@ test("R-23: 繰り返しタスクの完了・取り消しは予定に影響し�
   await T.completeTask(UI, t.id, false)
   assert.equal(rows("myflow_timeboxes").find(x => x.id === b.timebox.id).status, "planned")
 })
+
+// ---------- R-03: 時間帯の設定を変えたら、未実施の予定が追従する ----------
+
+test("R-03: 「夜」の時間帯を変えると、今日以降の未実施の予定が新しい時間帯に追従する", async () => {
+  const S = await import("../lib/services/settings")
+  const t = await mkTask("夜の作業", "private", { estimate_minutes: 60 })
+  const d = addDays(today(), 2)
+  const planned = (await B.createTimebox(UI, { task_id: t.id, date: d, ...NIGHT, planned_minutes: 60 })).timebox
+  const past = (await B.createTimebox(UI, { task_id: t.id, date: addDays(today(), 4), ...NIGHT, planned_minutes: 30 })).timebox
+  rows("myflow_timeboxes").find(r => r.id === past.id).date = addDays(today(), -3)
+  const doneBox = (await B.createTimebox(UI, { task_id: t.id, date: addDays(today(), 3), ...NIGHT, planned_minutes: 30 })).timebox
+  rows("myflow_timeboxes").find(r => r.id === doneBox.id).status = "done"
+  const custom = (await B.createTimebox(UI, { task_id: t.id, date: d, window_start: 1140, window_end: 1230, planned_minutes: 30 })).timebox // 別の窓（カスタム）
+
+  const saved = await S.saveSettings(UI, { presets: [
+    { key: "morning", label: "朝", start: 360, end: 600 },
+    { key: "noon", label: "昼", start: 720, end: 1020 },
+    { key: "night", label: "夜", start: 1200, end: 1380 }, // 20:00-23:00
+  ] })
+  const find = (id: string) => rows("myflow_timeboxes").find(r => r.id === id)
+  assert.deepEqual([find(planned.id).window_start, find(planned.id).window_end, find(planned.id).preset], [1200, 1380, "night"])
+  assert.deepEqual([find(past.id).window_start, find(past.id).window_end], [1140, 1320], "過去の予定は動かさない")
+  assert.deepEqual([find(doneBox.id).window_start, find(doneBox.id).window_end], [1140, 1320], "完了済みは動かさない")
+  assert.deepEqual([find(custom.id).window_start, find(custom.id).window_end], [1140, 1230], "カスタムの窓は動かさない")
+  assert.equal((saved as any).carryover.moved, 1)
+})
+
+test("R-03: 新しい時間帯より作業時間が長い予定は動かさず、件数を知らせる", async () => {
+  const S = await import("../lib/services/settings")
+  const t = await mkTask("長い作業", "private", { estimate_minutes: 150 })
+  const box = (await B.createTimebox(UI, { task_id: t.id, date: addDays(today(), 1), ...NIGHT, planned_minutes: 150 })).timebox
+  const saved = await S.saveSettings(UI, { presets: [
+    { key: "morning", label: "朝", start: 360, end: 600 },
+    { key: "noon", label: "昼", start: 720, end: 1020 },
+    { key: "night", label: "夜", start: 1200, end: 1260 }, // 1時間だけ
+  ] })
+  const r = rows("myflow_timeboxes").find(x => x.id === box.id)
+  assert.deepEqual([r.window_start, r.window_end], [1140, 1320])
+  assert.deepEqual([(saved as any).carryover.moved, (saved as any).carryover.skipped], [0, 1])
+})
+
+test("R-03: 時間帯を変えない保存では何も動かない／ラベルだけの変更でも動かない", async () => {
+  const S = await import("../lib/services/settings")
+  const t = await mkTask("x", "private")
+  const box = (await B.createTimebox(UI, { task_id: t.id, date: addDays(today(), 1), ...NIGHT, planned_minutes: 30 })).timebox
+  const saved = await S.saveSettings(UI, { bufferMinutes: 10 })
+  assert.deepEqual([(saved as any).carryover.moved, (saved as any).carryover.skipped], [0, 0])
+  assert.equal(rows("myflow_timeboxes").find(x => x.id === box.id).window_start, 1140)
+})

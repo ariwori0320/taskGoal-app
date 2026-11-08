@@ -401,8 +401,18 @@ export function useStoreState() {
   }, [fail, refresh])
 
   const saveSettings = useCallback(async (patch: Partial<Settings>): Promise<boolean> => {
-    try { const s = await api<Settings>("/api/settings", { method: "PATCH", body: patch }); setSettings(s); await refresh(); return true } catch (e) { fail(e); return false }
-  }, [fail, refresh])
+    try {
+      const { carryover, ...s } = await api<Settings & { carryover?: { moved: number; skipped: number } }>("/api/settings", { method: "PATCH", body: patch })
+      setSettings(s); await refresh()
+      if (carryover && (carryover.moved || carryover.skipped)) {
+        const parts = []
+        if (carryover.moved) parts.push(`${carryover.moved}件の予定を新しい時間帯に合わせました`)
+        if (carryover.skipped) parts.push(`${carryover.skipped}件は作業時間が収まらないため元の時間のままです`)
+        toast(parts.join("。"), { ms: 6000 })
+      }
+      return true
+    } catch (e) { fail(e); return false }
+  }, [fail, refresh, toast])
 
   // ---- 目標・メモ ----
   const pctTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
