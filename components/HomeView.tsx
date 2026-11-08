@@ -56,9 +56,13 @@ export default function HomeView() {
   const hasPlanned = (id: string) => (s.boxesByTask.get(id) ?? []).some(b => b.status === "planned")
   const byDue = (a: TaskRow, b: TaskRow) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999") || ({ high: 0, mid: 1, low: 2 }[a.priority] - { high: 0, mid: 1, low: 2 }[b.priority])
   const unplaced = s.unplaced
-  const nearDue = s.tasks
+  // 期限が近いタスクのうち、上の「未配置」に表示中のものは重複させない（未配置は期限順なので、期限が近い未配置は先頭に並ぶ）
+  const shownAbove = new Set(unplaced.slice(0, 6).map(t => t.id))
+  const dueSoon = s.tasks
     .filter(t => !t.is_recurring && !isTaskDone(t, today) && t.due_date && t.due_date <= addDays(today, 3))
     .sort(byDue)
+  const nearDue = dueSoon.filter(t => !shownAbove.has(t.id))
+  const dueShownAbove = dueSoon.length - nearDue.length
   const missed = s.boxes.filter(b => b.status === "planned" && (b.date < today || (b.date === today && b.window_end <= now.minutes))).length
 
   const active = s.tasks.filter(t => !isTaskDone(t, today) && !t.parent_id).length
@@ -241,9 +245,10 @@ export default function HomeView() {
       </section>
 
       <section className="section" aria-labelledby="h-due">
-        <div className="section-head"><h2 className="section-title" id="h-due">期限が近いタスク<span className="count num">{nearDue.length}</span></h2></div>
+        <div className="section-head"><h2 className="section-title" id="h-due">期限が近いタスク<span className="count num">{dueSoon.length}</span></h2></div>
         <ul className="list">
-          {nearDue.length === 0 && <li className="empty">3日以内に期限のタスクはありません。</li>}
+          {dueSoon.length === 0 && <li className="empty">3日以内に期限のタスクはありません。</li>}
+          {dueShownAbove > 0 && <li className="hint" style={{ padding: "4px 0 8px" }}>{dueShownAbove}件は、上の「未配置のタスク」に表示しています。</li>}
           {nearDue.slice(0, 6).map(t => (
             <li key={t.id} className="row">
               <Check checked={false} label={`${t.text} を完了にする`} onChange={() => s.toggleTask(t)} />
