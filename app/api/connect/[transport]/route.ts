@@ -1,6 +1,7 @@
 import { createMcpHandler } from "mcp-handler"
 import { authenticateAi } from "@/lib/ai-auth"
 import { registerTools } from "@/lib/mcp-tools"
+import { origin } from "@/lib/oauth"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -12,7 +13,7 @@ async function handle(req: Request): Promise<Response> {
   if (!auth.ok) {
     return new Response(JSON.stringify({ error: auth.error }), {
       status: auth.status,
-      headers: { "content-type": "application/json", ...(auth.status === 401 ? { "WWW-Authenticate": "Bearer" } : {}) },
+      headers: { "content-type": "application/json", ...(auth.status === 401 ? { "WWW-Authenticate": `Bearer resource_metadata="${origin(req)}/.well-known/oauth-protected-resource"` } : {}) },
     })
   }
   const handler = createMcpHandler(
