@@ -69,7 +69,7 @@ export type EventType =
   | "task_created" | "task_completed" | "task_reopened" | "task_deleted" | "task_category_changed" | "task_unplaced"
   | "timebox_created" | "timebox_moved" | "timebox_postponed" | "timebox_resized" | "timebox_done" | "timebox_split" | "timebox_unplaced"
   | "fixed_event_deleted"
-  | "ai_call" | "token_created" | "token_revoked"
+  | "ai_call" | "token_created" | "token_updated" | "token_revoked"
 
 export interface EventRow {
   id: string

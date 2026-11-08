@@ -7,6 +7,7 @@ import { addDays, DAY_LABELS, fmtMdDow, hhmmToMinutes, minutesToHhmm } from "@/l
 import type { TaskRow, TimeboxDb } from "@/lib/types"
 import { fmtDuration, parseTags, relDay, renderWithLinks, windowText } from "./format"
 import { slotLoad as slotLoadOf } from "./load"
+import { AiAccessSheet } from "./AiAccessSheet"
 import { api, useStore, type MemoRow, type Schedule } from "./store"
 import { Check, Menu, Sheet } from "./ui"
 
@@ -21,6 +22,7 @@ export type SheetState =
   | { kind: "pick"; date: string; window: [number, number] }
   | { kind: "fixed"; id?: string; date?: string }
   | { kind: "settings" }
+  | { kind: "ai" }
   | { kind: "goal"; goalId?: string }
   | { kind: "memo"; memoId?: string }
 
@@ -42,6 +44,7 @@ export function SheetsProvider({ children }: { children: ReactNode }) {
       {cur?.kind === "pick" && <PickTaskSheet date={cur.date} window={cur.window} />}
       {cur?.kind === "fixed" && <FixedEventSheet key={cur.id ?? "new"} id={cur.id} date={cur.date} />}
       {cur?.kind === "settings" && <SettingsSheet />}
+      {cur?.kind === "ai" && <AiAccessSheet />}
       {cur?.kind === "goal" && <GoalSheet key={cur.goalId ?? "new"} goalId={cur.goalId} />}
       {cur?.kind === "memo" && <MemoSheet key={cur.memoId ?? "new"} memoId={cur.memoId} />}
     </SheetsCtx.Provider>
@@ -647,6 +650,11 @@ function SettingsSheet() {
           {(TIMEZONES.includes(tz) ? TIMEZONES : [tz, ...TIMEZONES]).map(z => <option key={z} value={z}>{z}</option>)}
         </select>
         <p className="hint">「今日」の日付はこのタイムゾーンで決まります。</p>
+      </div>
+      <div className="field" style={{ borderTop: "1px solid var(--line)", paddingTop: 16, marginTop: 8 }}>
+        <span className="label">AI 連携</span>
+        <p className="hint" style={{ marginBottom: 8 }}>Claude や ChatGPT から、タスクの確認・追加・予定の調整ができるようにします。見せるカテゴリと許す操作は、合鍵ごとに決められます。</p>
+        <button type="button" className="btn" onClick={() => sheets.open({ kind: "ai" })}>AI 連携を管理する</button>
       </div>
     </Sheet>
   )

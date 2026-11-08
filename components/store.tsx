@@ -23,11 +23,11 @@ export class ApiError extends Error {
   constructor(message: string, status: number, code?: string) { super(message); this.status = status; this.code = code }
 }
 
-export async function api<T = any>(path: string, init?: { method?: string; body?: unknown }): Promise<T> { // eslint-disable-line @typescript-eslint/no-explicit-any
+export async function api<T = any>(path: string, init?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<T> { // eslint-disable-line @typescript-eslint/no-explicit-any
   const hasBody = init?.body !== undefined
   const res = await fetch(path, {
     method: init?.method ?? "GET",
-    headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+    headers: hasBody || init?.headers ? { ...(hasBody ? { "Content-Type": "application/json" } : {}), ...init?.headers } : undefined,
     body: hasBody ? JSON.stringify(init!.body) : undefined,
     cache: "no-store",
   })
