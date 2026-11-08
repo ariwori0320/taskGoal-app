@@ -589,3 +589,41 @@ test("R-20: 権限のないカテゴリの古い予定は keepOpen でも返ら�
   const r = await B.listTimeboxes(priv, { from: addDays(today(), -30), keepOpen: true })
   assert.equal(r.length, 0)
 })
+
+// ---------- 子・孫タスクの階層（AI 連携向け） ----------
+
+test("階層: listTasks は、完了済みの親が一覧から外れても、子の path を正しく返す。権限外のカテゴリは混ざらない", async () => {
+  const root = await mkTask("提案書", "private")
+  const mid = await mkTask("資料づくり", "private", { parent_id: root.id })
+  const leaf = await mkTask("グラフ作成", "private", { parent_id: mid.id, estimate_minutes: 30 })
+  await mkTask("仕事の親", "work")
+  rows("tasks").find(r => r.id === mid.id).done = true // 中間の親を完了にして、active の一覧から外す
+  const r = await T.listTasks(ai(["private"], ["read"]), { status: "active" })
+  assert.ok(!r.tasks.some(t => t.id === mid.id))
+  const node = r.hierarchy.get(leaf.id)!
+  assert.deepEqual([node.path, node.depth, node.root_id], [["提案書", "資料づくり"], 2, root.id])
+  assert.ok(!Array.from(r.hierarchy.keys()).some(id => rows("tasks").find(x => x.id === id)?.mode === "work"), "仕事のタスクは入らない")
+})
+
+test("階層: listUnplacedTasks は『葉』だけを返し、親の経路と見積りの残りを付ける（予定済み・完了・繰り返し・親は除く）", async () => {
+  const root = await mkTask("提案書", "private")
+  const mid = await mkTask("資料づくり", "private", { parent_id: root.id })
+  const a = await mkTask("グラフ作成", "private", { parent_id: mid.id, estimate_minutes: 60, due_date: addDays(today(), 2) })
+  const placed = await mkTask("表作成", "private", { parent_id: mid.id, estimate_minutes: 30 })
+  const done = await mkTask("完了済み", "private", { parent_id: root.id }); await T.completeTask(UI, done.id, true)
+  await B.createTimebox(UI, { task_id: placed.id, date: addDays(today(), 1), ...NIGHT, planned_minutes: 30 })
+  const solo = await mkTask("単独タスク", "private")
+  await mkTask("毎日の習慣", "private", { is_recurring: true, recurring_days: "0,1,2,3,4,5,6" })
+  await mkTask("仕事の葉", "work")
+
+  const r = await T.listUnplacedTasks(ai(["private"], ["read"]), {})
+  const ids = r.items.map(i => i.task.id).sort()
+  assert.deepEqual(ids, [a.id, solo.id].sort(), "葉・未予定・未完了・非繰り返し・見える範囲のみ")
+  const item = r.items.find(i => i.task.id === a.id)!
+  assert.deepEqual([item.node.path, item.unplaced_minutes], [["提案書", "資料づくり"], 60])
+  assert.equal(r.items[0].task.id, a.id, "期限のあるものが先")
+})
+
+test("階層: listUnplacedTasks は read 権限が無ければ拒否される", async () => {
+  await rejectsWith(T.listUnplacedTasks(ai(["private"], ["schedule"]), {}), 403)
+})

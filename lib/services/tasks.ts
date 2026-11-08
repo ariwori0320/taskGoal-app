@@ -5,7 +5,7 @@ import {
   badRequest, migrationRequired, requireMode, requireScope, resolveModes,
   type Mode, type Principal,
 } from "../principal"
-import { isTaskDone } from "../task-utils"
+import { buildHierarchy, isTaskDone, type TaskNode } from "../task-utils"
 import { nowInTz } from "../time"
 import type { TaskRow, TimeboxDb } from "../types"
 import { cleanText, normDays, optBool, optEstimate, optPriority, optString, optYmd } from "../validate"
@@ -47,16 +47,18 @@ export interface ListTasksQuery {
   limit?: number
 }
 
-export async function listTasks(p: Principal, query: ListTasksQuery = {}): Promise<{ today: string; tasks: TaskRow[] }> {
+export async function listTasks(p: Principal, query: ListTasksQuery = {}): Promise<{ today: string; tasks: TaskRow[]; hierarchy: Map<string, TaskNode> }> {
   requireScope(p, "read")
   const modes = resolveModes(p, query.mode)
   const settings = await loadSettings(p.userId)
   const today = nowInTz(settings.timezone).date
-  if (modes.length === 0) return { today, tasks: [] }
+  if (modes.length === 0) return { today, tasks: [], hierarchy: new Map() }
 
   const conds: Cond[] = [["user_id", "eq", p.userId], ["mode", "in", modes]]
   if (query.goal_id) conds.push(["goal_id", "eq", query.goal_id])
   let rows = (await db.find("tasks", conds, { order: "created_at.desc", limit: Math.min(query.limit ?? 1000, 2000) })) as TaskRow[]
+  // 階層は、絞り込む前の全件から作る（完了済みの親が外れても、子の「親の経路」を失わないように）。見える範囲(modes)の中だけ。
+  const hierarchy = buildHierarchy(rows, today)
 
   const status = query.status ?? "active"
   if (status === "active") rows = rows.filter(t => !isTaskDone(t, today))
@@ -67,7 +69,45 @@ export async function listTasks(p: Principal, query: ListTasksQuery = {}): Promi
   }
   if (query.due_from) rows = rows.filter(t => t.due_date && t.due_date >= query.due_from!)
   if (query.due_to) rows = rows.filter(t => t.due_date && t.due_date <= query.due_to!)
-  return { today, tasks: rows }
+  return { today, tasks: rows, hierarchy }
+}
+
+export interface UnplacedItem { task: TaskRow; node: TaskNode; planned_minutes: number; done_minutes: number; unplaced_minutes: number | null }
+
+/**
+ * 「未配置のタスク」: まだ予定（タイムボックス）に入っていない、これから作業する単位。
+ * 画面の「未配置」と同じ定義 = 子を持たない葉 / 未完了 / 繰り返しでない / 未実施の予定が無い。
+ * 親（子を持つタスク）は、葉をまとめる見出しなので含めず、各葉に親の経路(node.path)を付ける。
+ * 並びは、期限が早い順 → 優先度が高い順 → 古い順。
+ */
+export async function listUnplacedTasks(p: Principal, query: { mode?: string | null; limit?: number } = {}): Promise<{ today: string; items: UnplacedItem[] }> {
+  requireScope(p, "read")
+  const { today, tasks, hierarchy } = await listTasks(p, { mode: query.mode, status: "all", limit: 2000 })
+  const modes = resolveModes(p, query.mode)
+  let boxes: TimeboxDb[] = []
+  if (modes.length > 0) {
+    try {
+      boxes = (await db.find("myflow_timeboxes", [["user_id", "eq", p.userId], ["mode", "in", modes], ["status", "in", ["planned", "done"]]], { limit: 2000 })) as TimeboxDb[]
+    } catch (e) {
+      if (!isMissingTable(e)) throw e
+    }
+  }
+  const plannedBy = new Map<string, number>(), doneBy = new Map<string, number>(), hasPlanned = new Set<string>()
+  for (const b of boxes) {
+    if (b.status === "planned") { hasPlanned.add(b.task_id); plannedBy.set(b.task_id, (plannedBy.get(b.task_id) ?? 0) + b.planned_minutes) }
+    else doneBy.set(b.task_id, (doneBy.get(b.task_id) ?? 0) + (b.actual_minutes ?? b.planned_minutes))
+  }
+  const prio = { high: 0, mid: 1, low: 2 } as Record<string, number>
+  const items = tasks
+    .filter(t => !t.is_recurring && !isTaskDone(t, today) && hierarchy.get(t.id)?.is_leaf && !hasPlanned.has(t.id))
+    .sort((a, b) => (a.due_date ?? "9999") < (b.due_date ?? "9999") ? -1 : (a.due_date ?? "9999") > (b.due_date ?? "9999") ? 1
+      : (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1) || (a.created_at < b.created_at ? -1 : 1))
+    .slice(0, Math.min(query.limit ?? 200, 500))
+    .map(t => {
+      const est = t.estimate_minutes ?? null, planned = plannedBy.get(t.id) ?? 0, done = doneBy.get(t.id) ?? 0
+      return { task: t, node: hierarchy.get(t.id)!, planned_minutes: planned, done_minutes: done, unplaced_minutes: est === null ? null : Math.max(0, est - planned - done) }
+    })
+  return { today, items }
 }
 
 export async function getTaskDetail(p: Principal, id: string) {

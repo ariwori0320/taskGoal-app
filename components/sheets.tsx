@@ -220,6 +220,7 @@ function PickTaskSheet({ date, window: win }: { date: string; window: [number, n
   const pick = (t: TaskRow) => sheets.open({ kind: "schedule", taskId: t.id, date, window: win })
   const Item = ({ t, sub }: { t: TaskRow; sub?: string }) => (
     <li><button type="button" className="unplaced-item" onClick={() => pick(t)}>
+      {s.pathOf(t) && <span className="crumb">{s.pathOf(t)}</span>}
       <span className="t">{t.text}</span>
       <span className="m">{[t.due_date ? `期限 ${fmtMdDow(t.due_date)}` : "", t.estimate_minutes ? fmtDuration(t.estimate_minutes) : "", sub ?? ""].filter(Boolean).join(" ・ ")}</span>
     </button></li>

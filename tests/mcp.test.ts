@@ -122,7 +122,7 @@ test("ツール一覧は、トークンの権限に合うものだけ（既定�
 
   const all = await mint({ name: "all", scopes: ["read", "task_add", "task_edit", "schedule", "complete", "delete"] })
   const n3 = await toolNames(all.token)
-  assert.equal(n3.length, 21)
+  assert.equal(n3.length, 22)
 })
 
 test("見えないツールを直接呼んでも実行されない", async () => {
@@ -392,4 +392,35 @@ test("R-14: 成功すると失敗の回数はリセットされる／時間が�
   T.recordFailure("j", 1000); T.clearFailures("j")
   for (let i = 0; i < T.MAX_FAILURES - 1; i++) T.recordFailure("j", 2000)
   assert.equal(T.blockedSeconds("j", 2000), 0, "成功でリセット済み")
+})
+
+test("階層(AI): list_tasks / get_task が親の経路・深さ・進み具合を返し、get_unplaced_tasks が葉だけを経路つきで返す", async () => {
+  const root = await mk("提案書", "private")
+  const mid = await mk("資料づくり", "private", { parent_id: root.id })
+  const leaf = await mk("グラフ作成", "private", { parent_id: mid.id, estimate_minutes: 45 })
+  const t = await mint({ name: "reader", scopes: ["read"] })
+
+  const list = (await call(t.token, "list_tasks", { status: "all" })).data as any // eslint-disable-line @typescript-eslint/no-explicit-any
+  const byText = (n: string) => list.tasks.find((x: any) => x.text === n) // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.deepEqual([byText("グラフ作成").path, byText("グラフ作成").depth, byText("グラフ作成").is_leaf], [["提案書", "資料づくり"], 2, true])
+  assert.deepEqual([byText("提案書").is_leaf, byText("提案書").children, byText("提案書").leaves], [false, { total: 1, done: 0 }, { total: 1, done: 0 }])
+
+  const detail = (await call(t.token, "get_task", { id: root.id })).data as any // eslint-disable-line @typescript-eslint/no-explicit-any
+  const sub = detail.subtasks.find((x: any) => x.text === "グラフ作成") // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.deepEqual([sub.path, sub.depth], [["提案書", "資料づくり"], 2], "孫タスクも経路つきで返る")
+
+  const un = (await call(t.token, "get_unplaced_tasks", {})).data as any // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal(un.count, 1)
+  assert.deepEqual([un.tasks[0].id, un.tasks[0].path, un.tasks[0].unplaced_minutes], [leaf.id, ["提案書", "資料づくり"], 45])
+  assert.ok(!un.tasks.some((x: any) => x.text === "提案書"), "親は未配置の一覧に出さない") // eslint-disable-line @typescript-eslint/no-explicit-any
+})
+
+test("階層(AI): get_unplaced_tasks は read 権限と、カテゴリの許可に従う", async () => {
+  await mk("私的な葉", "private"); await mk("仕事の葉", "work")
+  const priv = await mint({ name: "p", modes: ["private"], scopes: ["read"] })
+  const un = (await call(priv.token, "get_unplaced_tasks", {})).data as any // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.deepEqual(un.tasks.map((x: any) => x.text), ["私的な葉"]) // eslint-disable-line @typescript-eslint/no-explicit-any
+  assert.equal((await call(priv.token, "get_unplaced_tasks", { mode: "work" })).isError, true)
+  const names = ((await rpc((await mint({ name: "w", scopes: ["task_add"] })).token, "tools/list")).body.result.tools as { name: string }[]).map(x => x.name)
+  assert.ok(!names.includes("get_unplaced_tasks"), "read が無ければツールも見えない")
 })
