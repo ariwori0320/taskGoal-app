@@ -627,3 +627,37 @@ test("階層: listUnplacedTasks は『葉』だけを返し、親の経路と見
 test("階層: listUnplacedTasks は read 権限が無ければ拒否される", async () => {
   await rejectsWith(T.listUnplacedTasks(ai(["private"], ["schedule"]), {}), 403)
 })
+
+// ---------- R-12: 完了の途中で失敗しても、タスクだけ完了にならない ----------
+
+test("R-12: 完了の途中（予定の更新）で失敗したら、タスクの完了も元に戻す", async () => {
+  const t = await mkTask("途中で失敗するタスク", "private", { estimate_minutes: 30 })
+  const box = (await B.createTimebox(UI, { task_id: t.id, date: today(), window_start: 0, window_end: 1439, planned_minutes: 30 })).timebox
+  // タスク更新(tasks)は通り、予定の取得(1回目)は通し、予定の更新(2回目)で失敗させる
+  mock.failNext("myflow_timeboxes", 500, { message: "boom" }, 1)
+  await assert.rejects(T.completeTask(UI, t.id, true))
+  assert.equal(rows("tasks").find(r => r.id === t.id).done, false, "タスクは完了にならない")
+  assert.equal(rows("myflow_timeboxes").find(r => r.id === box.id).status, "planned", "予定も元のまま")
+  assert.ok(!rows("myflow_events").some(e => e.type === "task_completed"), "完了の履歴も残らない")
+  // 失敗が解消すれば、もう一度完了できる
+  const ok = await T.completeTask(UI, t.id, true)
+  assert.equal(ok.task.done, true)
+})
+
+test("R-12: 完了の途中（残りの予定の解放）で失敗したら、実施済みにした予定も元に戻す", async () => {
+  const t = await mkTask("複数の予定", "private", { estimate_minutes: 60 })
+  const b1 = (await B.createTimebox(UI, { task_id: t.id, date: today(), window_start: 0, window_end: 1439, planned_minutes: 30 })).timebox
+  const b2 = (await B.createTimebox(UI, { task_id: t.id, date: addDays(today(), 2), ...NIGHT, planned_minutes: 30 })).timebox
+  mock.failNext("myflow_timeboxes", 500, { message: "boom" }, 2) // 取得・今日の予定の更新は通り、解放で失敗
+  await assert.rejects(T.completeTask(UI, t.id, true))
+  assert.equal(rows("tasks").find(r => r.id === t.id).done, false)
+  assert.deepEqual([b1.id, b2.id].map(id => rows("myflow_timeboxes").find(r => r.id === id).status), ["planned", "planned"])
+})
+
+test("R-12: 繰り返しタスクも、失敗したら完了日を元に戻す", async () => {
+  const t = await mkTask("毎日", "private", { is_recurring: true, recurring_days: "0,1,2,3,4,5,6" })
+  await B.createTimebox(UI, { task_id: t.id, date: today(), window_start: 0, window_end: 1439, planned_minutes: 10 })
+  mock.failNext("myflow_timeboxes", 500, { message: "boom" }, 1)
+  await assert.rejects(T.completeTask(UI, t.id, true))
+  assert.equal(rows("tasks").find(r => r.id === t.id).recurring_done_date ?? null, null)
+})

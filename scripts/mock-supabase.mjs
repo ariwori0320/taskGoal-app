@@ -88,7 +88,7 @@ export function createMockSupabase(opts = {}) {
   for (const t of allowed) store[t] = []
   const log = [] // リクエスト履歴（テストで「本番を叩いていない」等の確認に使う）
   /** @type {{ table: string, status: number, body: unknown }[]} 次の1回だけ、指定テーブルへのリクエストを失敗させる（異常系のテスト用） */
-  const injected = []
+  const injected = [] // { table, status, body, after } after=その前に通すリクエスト数
 
   const send = (res, status, body) => {
     const text = body === undefined ? "" : JSON.stringify(body)
@@ -105,7 +105,10 @@ export function createMockSupabase(opts = {}) {
       log.push({ method: req.method, table, query: url.search })
       if (!req.headers["apikey"]) return send(res, 401, { message: "No API key found in request" })
       const inj = injected.findIndex(r => r.table === table)
-      if (inj !== -1) { const [r] = injected.splice(inj, 1); return send(res, r.status, r.body) }
+      if (inj !== -1) {
+        if (injected[inj].after > 0) injected[inj].after--
+        else { const [r] = injected.splice(inj, 1); return send(res, r.status, r.body) }
+      }
       if (!allowed.has(table)) {
         return send(res, 404, { code: "PGRST205", message: `Could not find the table 'public.${table}' in the schema cache` })
       }
@@ -186,7 +189,7 @@ export function createMockSupabase(opts = {}) {
     listen: (port = 0) => new Promise(resolve => server.listen(port, "127.0.0.1", () => resolve(server.address().port))),
     close: () => new Promise(resolve => server.close(() => resolve())),
     /** 次の1回、table へのリクエストを status/body で失敗させる */
-    failNext(table, status = 500, body = { message: "injected failure" }) { injected.push({ table, status, body }) },
+    failNext(table, status = 500, body = { message: "injected failure" }, after = 0) { injected.push({ table, status, body, after }) },
     reset() { for (const t of allowed) store[t].length = 0; log.length = 0; injected.length = 0 },
   }
 }

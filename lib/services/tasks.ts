@@ -322,9 +322,15 @@ export async function completeTask(p: Principal, id: string, done = true) {
     : { done }
   const task = (await db.update("tasks", id, updates)) as TaskRow
 
+  // 複数テーブルにまたがる更新は1つのトランザクションにできないため、途中で失敗したら、
+  // ここまでの更新を逆順に元へ戻す（タスクだけ完了／予定だけ実施済み、という食い違いを残さない）。
+  const undo: (() => Promise<unknown>)[] = [
+    () => db.update("tasks", id, t.is_recurring ? { recurring_done_date: t.recurring_done_date ?? null } : { done: !!t.done }),
+  ]
   let doneBox: TimeboxDb | null = null
   let released = 0
   let restored = 0
+  try {
   if (done) {
     try {
       const planned = (await db.find("myflow_timeboxes", [["user_id", "eq", p.userId], ["task_id", "eq", id], ["status", "eq", "planned"]], { limit: 200 })) as TimeboxDb[]
@@ -336,12 +342,15 @@ export async function completeTask(p: Principal, id: string, done = true) {
           status: "done", completed_at: new Date().toISOString(), actual_minutes: todays.planned_minutes,
           kept_window: kept, updated_at: new Date().toISOString(),
         })) as TimeboxDb
+        undo.push(() => db.update("myflow_timeboxes", todays.id, { status: "planned", completed_at: null, actual_minutes: null, kept_window: null, updated_at: new Date().toISOString() }))
       }
       if (!t.is_recurring) {
         // 完了したタスクの残りの予定は不要になる（履歴として残し、計画からは外す）
         const rest = planned.filter(b => b.id !== todays?.id)
         if (rest.length > 0) {
-          await db.updateWhere("myflow_timeboxes", [["user_id", "eq", p.userId], ["id", "in", rest.map(b => b.id)]], { status: "released", updated_at: new Date().toISOString() })
+          const restIds = rest.map(b => b.id)
+          await db.updateWhere("myflow_timeboxes", [["user_id", "eq", p.userId], ["id", "in", restIds]], { status: "released", updated_at: new Date().toISOString() })
+          undo.push(() => db.updateWhere("myflow_timeboxes", [["user_id", "eq", p.userId], ["id", "in", restIds]], { status: "planned", updated_at: new Date().toISOString() }))
           released = rest.length
         }
       }
@@ -359,6 +368,12 @@ export async function completeTask(p: Principal, id: string, done = true) {
     } catch (e) {
       if (!isMissingTable(e)) throw e
     }
+  }
+  } catch (e) {
+    for (const u of undo.reverse()) {
+      try { await u() } catch (ue) { console.error("[completeTask] 元に戻せませんでした", ue instanceof Error ? ue.message.slice(0, 200) : ue) }
+    }
+    throw e
   }
 
   await recordEvent(p, {
